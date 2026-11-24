@@ -270,10 +270,9 @@ public final class TellusCanopyHeightSource implements TellusCacheHandle {
       int startingUnits = completedOffset;
       progressConsumer.accept(completedOffset, "Loading " + keys.size() + " ETH canopy-height source tiles");
       return ParallelDownloadRunner.run(
-         ParallelDownloadRunner.scope(
-            "canopy-height-memory",
-            TellusCacheRegistry.generation(TellusCacheDomain.CANOPY_HEIGHT)
-         ),
+         // The tile cache coalesces concurrent loads itself. A best-effort prefetch
+         // may return without a tile, and memory entries may be evicted, so do not
+         // mark these tasks as durable recently-completed downloads.
          keys,
          completedOffset,
          this::loadTileIntoCache,
@@ -330,12 +329,17 @@ public final class TellusCanopyHeightSource implements TellusCacheHandle {
          }
 
          try {
-            return this.cache.get(key, () -> this.loadTile(key, lookupMode));
+            return CanopyTileLookup.get(this.cache, key, () -> this.loadTile(key, lookupMode),
+               () -> lookupMode == LookupMode.BLOCKING && !ManagedTerrainNetworkPolicy.isCacheOnly());
          } catch (ExecutionException | RuntimeException error) {
             if (lookupMode != LookupMode.BLOCKING) {
                return null;
             }
             Throwable cause = error.getCause() != null ? error.getCause() : error;
+            if (cause instanceof CanopyTileLookup.LocalCacheMiss) {
+               // Offline misses are not failures of the remote service.
+               return null;
+            }
             if (SourceInterrupts.isInterruption(cause)) {
                // A cancelled request is not a service failure. Concurrent requests share one load,
                // so a request that was not cancelled itself loads the tile again.
@@ -375,7 +379,7 @@ public final class TellusCanopyHeightSource implements TellusCacheHandle {
       }
 
       if (lookupMode != LookupMode.BLOCKING || ManagedTerrainNetworkPolicy.isCacheOnly()) {
-         throw new IOException("ETH canopy tile is not in the local cache");
+         throw new CanopyTileLookup.LocalCacheMiss();
       }
 
       byte[] bytes = this.fetchTile(key);
