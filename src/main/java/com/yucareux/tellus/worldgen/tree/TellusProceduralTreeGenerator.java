@@ -1277,6 +1277,13 @@ public final class TellusProceduralTreeGenerator {
    }
 
    private static Profile profileForBiome(Holder<Biome> biome) {
+      // Exact swamp identities need no biome-tag lookup and agree with preview planning.
+      if (biome.is(Biomes.MANGROVE_SWAMP)) {
+         return Profile.MANGROVE;
+      }
+      if (biome.is(Biomes.SWAMP)) {
+         return Profile.SWAMP;
+      }
       if (biome.is(Biomes.CHERRY_GROVE)) {
          return Profile.CHERRY;
       }
@@ -1303,12 +1310,6 @@ public final class TellusProceduralTreeGenerator {
       }
       if (biome.is(Biomes.DARK_FOREST)) {
          return Profile.DARK_BROADLEAF;
-      }
-      if (biome.is(Biomes.MANGROVE_SWAMP)) {
-         return Profile.MANGROVE;
-      }
-      if (biome.is(Biomes.SWAMP)) {
-         return Profile.SWAMP;
       }
       return Profile.TEMPERATE_BROADLEAF;
    }
