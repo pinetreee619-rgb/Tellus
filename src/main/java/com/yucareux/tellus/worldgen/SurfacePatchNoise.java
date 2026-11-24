@@ -27,6 +27,11 @@ public final class SurfacePatchNoise {
    private static final int DISTRIBUTION_SAMPLES_PER_AXIS = 384;
    private static final long DISTRIBUTION_SALT = 6364136223846793005L;
    private static final double MAX_UNIFORM = Math.nextDown(1.0);
+   // Every integer position in an octave repeats the same finite set of fade weights.
+   // Initialize before quantile calibration, which samples the same field.
+   private static final double[] BROAD_FADE = buildFadeTable(BROAD_CELL_BLOCKS);
+   private static final double[] PATCH_FADE = buildFadeTable(PATCH_CELL_BLOCKS);
+   private static final double[] EDGE_FADE = buildFadeTable(EDGE_CELL_BLOCKS);
    private static final double[] QUANTILES = buildQuantiles();
    private static final double TABLE_MIN = QUANTILES[0];
    private static final double TABLE_SCALE = UNIFORM_TABLE_STEPS / (QUANTILES[QUANTILE_STEPS] - QUANTILES[0]);
@@ -68,9 +73,9 @@ public final class SurfacePatchNoise {
    }
 
    static double field(int worldX, int worldZ, long salt) {
-      return valueNoise(worldX, worldZ, BROAD_CELL_BLOCKS, salt) * BROAD_WEIGHT
-         + valueNoise(worldX + 37, worldZ - 53, PATCH_CELL_BLOCKS, salt ^ PATCH_OCTAVE_SALT) * PATCH_WEIGHT
-         + valueNoise(worldX - 71, worldZ + 19, EDGE_CELL_BLOCKS, salt ^ EDGE_OCTAVE_SALT) * EDGE_WEIGHT;
+      return valueNoise(worldX, worldZ, BROAD_CELL_BLOCKS, BROAD_FADE, salt) * BROAD_WEIGHT
+         + valueNoise(worldX + 37, worldZ - 53, PATCH_CELL_BLOCKS, PATCH_FADE, salt ^ PATCH_OCTAVE_SALT) * PATCH_WEIGHT
+         + valueNoise(worldX - 71, worldZ + 19, EDGE_CELL_BLOCKS, EDGE_FADE, salt ^ EDGE_OCTAVE_SALT) * EDGE_WEIGHT;
    }
 
    private static double toUniform(double value) {
@@ -116,11 +121,13 @@ public final class SurfacePatchNoise {
       return table;
    }
 
-   private static double valueNoise(int worldX, int worldZ, int cellSize, long salt) {
+   private static double valueNoise(int worldX, int worldZ, int cellSize, double[] fadeTable, long salt) {
       int cellX = Math.floorDiv(worldX, cellSize);
       int cellZ = Math.floorDiv(worldZ, cellSize);
-      double fractionX = fade((double)Math.floorMod(worldX, cellSize) / (double)cellSize);
-      double fractionZ = fade((double)Math.floorMod(worldZ, cellSize) / (double)cellSize);
+      // The remainder is in [0, cellSize), including negative coordinates.
+      // Integer wraparound in the product/subtraction also preserves that remainder.
+      double fractionX = fadeTable[worldX - cellX * cellSize];
+      double fractionZ = fadeTable[worldZ - cellZ * cellSize];
       double northWest = cellValue(cellX, cellZ, salt);
       double northEast = cellValue(cellX + 1, cellZ, salt);
       double southWest = cellValue(cellX, cellZ + 1, salt);
@@ -133,6 +140,14 @@ public final class SurfacePatchNoise {
    private static double cellValue(int cellX, int cellZ, long salt) {
       long mixed = mix64(salt ^ (long)cellX * 341873128712L ^ (long)cellZ * 132897987541L);
       return (double)(mixed >>> 11) * 0x1.0p-53;
+   }
+
+   private static double[] buildFadeTable(int cellSize) {
+      double[] table = new double[cellSize];
+      for (int i = 0; i < cellSize; i++) {
+         table[i] = fade((double)i / (double)cellSize);
+      }
+      return table;
    }
 
    private static double fade(double value) {

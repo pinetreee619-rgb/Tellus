@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.Random;
 import org.junit.jupiter.api.Test;
 
 class SurfacePatchNoiseTest {
@@ -73,5 +74,56 @@ class SurfacePatchNoiseTest {
       }
 
       assertEquals(0.5, (double)agreeing / samples, 0.1);
+   }
+
+   @Test
+   void precomputedFadesPreserveTheOriginalFieldExactly() {
+      Random random = new Random(93712L);
+      for (int i = 0; i < 10_000; i++) {
+         int x = random.nextInt();
+         int z = random.nextInt();
+         long salt = random.nextLong();
+         assertEquals(originalField(x, z, salt), SurfacePatchNoise.field(x, z, salt), 0.0);
+      }
+      for (int x : new int[]{Integer.MIN_VALUE, Integer.MIN_VALUE + 1, -96, -23, -7, -1, 0, 1, 7, 23, 96, Integer.MAX_VALUE}) {
+         for (int z : new int[]{Integer.MIN_VALUE, -97, -1, 0, 1, 97, Integer.MAX_VALUE}) {
+            assertEquals(originalField(x, z, SALT), SurfacePatchNoise.field(x, z, SALT), 0.0);
+         }
+      }
+   }
+
+   // Independent reference for the previous interpolation arithmetic.
+   private static double originalField(int x, int z, long salt) {
+      return originalNoise(x, z, 96, salt) * 0.5
+         + originalNoise(x + 37, z - 53, 23, salt ^ -7493989779944505343L) * 0.33
+         + originalNoise(x - 71, z + 19, 7, salt ^ 4354685564936845355L) * 0.17;
+   }
+
+   private static double originalNoise(int x, int z, int size, long salt) {
+      int cellX = Math.floorDiv(x, size);
+      int cellZ = Math.floorDiv(z, size);
+      double fx = originalFade((double)Math.floorMod(x, size) / (double)size);
+      double fz = originalFade((double)Math.floorMod(z, size) / (double)size);
+      double nw = originalCell(cellX, cellZ, salt);
+      double ne = originalCell(cellX + 1, cellZ, salt);
+      double sw = originalCell(cellX, cellZ + 1, salt);
+      double se = originalCell(cellX + 1, cellZ + 1, salt);
+      double north = nw + fx * (ne - nw);
+      double south = sw + fx * (se - sw);
+      return north + fz * (south - north);
+   }
+
+   private static double originalFade(double value) {
+      return value * value * value * (value * (value * 6.0 - 15.0) + 10.0);
+   }
+
+   private static double originalCell(int x, int z, long salt) {
+      long mixed = salt ^ (long)x * 341873128712L ^ (long)z * 132897987541L;
+      mixed ^= mixed >>> 33;
+      mixed *= -49064778989728563L;
+      mixed ^= mixed >>> 33;
+      mixed *= -4265267296055464877L;
+      mixed ^= mixed >>> 33;
+      return (double)(mixed >>> 11) * 0x1.0p-53;
    }
 }
