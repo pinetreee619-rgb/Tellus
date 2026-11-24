@@ -1883,6 +1883,7 @@ public final class TerrainPreview implements AutoCloseable {
          case MEDITERRANEAN -> 0x557A3E;
          case SAVANNA -> 0x76953E;
          case SWAMP -> 0x416F3A;
+         case MANGROVE -> 0x4B7838;
       };
    }
 
@@ -1899,6 +1900,7 @@ public final class TerrainPreview implements AutoCloseable {
          case EUCALYPTUS, MALLEE -> 0xB7AA91;
          case MEDITERRANEAN, SAVANNA -> 0x725036;
          case SWAMP -> 0x59402C;
+         case MANGROVE -> 0x553D31;
          case TEMPERATE_BROADLEAF -> PREVIEW_TREE_TRUNK_COLOR;
       };
    }
