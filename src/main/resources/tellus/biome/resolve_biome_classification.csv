@@ -66,8 +66,7 @@ TEMPERATE_CONIFER_FORESTS,50,*,plains
 TEMPERATE_CONIFER_FORESTS,60,*,stony_peaks
 TEMPERATE_CONIFER_FORESTS,90,*,swamp
 TEMPERATE_CONIFER_FORESTS,100,*,meadow
-# Boreal forest and taiga. Match the same cold-summer / severe-winter
-# climate codes for forest, shrubland and open grassland.
+# Boreal forest and taiga.
 BOREAL_FORESTS_TAIGA,10,ET,grove
 BOREAL_FORESTS_TAIGA,10,DFC,snowy_taiga
 BOREAL_FORESTS_TAIGA,10,DFD,snowy_taiga
@@ -79,18 +78,10 @@ BOREAL_FORESTS_TAIGA,10,*,taiga
 BOREAL_FORESTS_TAIGA,20,ET,snowy_plains
 BOREAL_FORESTS_TAIGA,20,DFC,snowy_plains
 BOREAL_FORESTS_TAIGA,20,DFD,snowy_plains
-BOREAL_FORESTS_TAIGA,20,DWC,snowy_plains
-BOREAL_FORESTS_TAIGA,20,DWD,snowy_plains
-BOREAL_FORESTS_TAIGA,20,DSC,snowy_plains
-BOREAL_FORESTS_TAIGA,20,DSD,snowy_plains
 BOREAL_FORESTS_TAIGA,20,*,meadow
 BOREAL_FORESTS_TAIGA,30,ET,snowy_plains
 BOREAL_FORESTS_TAIGA,30,DFC,snowy_plains
 BOREAL_FORESTS_TAIGA,30,DFD,snowy_plains
-BOREAL_FORESTS_TAIGA,30,DWC,snowy_plains
-BOREAL_FORESTS_TAIGA,30,DWD,snowy_plains
-BOREAL_FORESTS_TAIGA,30,DSC,snowy_plains
-BOREAL_FORESTS_TAIGA,30,DSD,snowy_plains
 BOREAL_FORESTS_TAIGA,30,*,meadow
 BOREAL_FORESTS_TAIGA,40,ET,snowy_plains
 BOREAL_FORESTS_TAIGA,40,*,plains
@@ -136,20 +127,15 @@ FLOODED_GRASSLANDS_SAVANNAS,100,*,swamp
 # Montane grasslands and shrublands.
 # This region also includes warm highlands. Grove is a snowy Minecraft biome,
 # so require polar climate evidence instead of treating all mountain trees as snow.
-# Alpine tundra with open cover uses snowy plains; warmer mountain meadows remain intact.
 MONTANE_GRASSLANDS_SHRUBLANDS,10,ET,grove
 MONTANE_GRASSLANDS_SHRUBLANDS,10,EF,grove
 MONTANE_GRASSLANDS_SHRUBLANDS,10,*,windswept_forest
-MONTANE_GRASSLANDS_SHRUBLANDS,20,ET,snowy_plains
 MONTANE_GRASSLANDS_SHRUBLANDS,20,*,windswept_hills
-MONTANE_GRASSLANDS_SHRUBLANDS,30,ET,snowy_plains
 MONTANE_GRASSLANDS_SHRUBLANDS,30,*,meadow
 MONTANE_GRASSLANDS_SHRUBLANDS,40,*,meadow
 MONTANE_GRASSLANDS_SHRUBLANDS,50,*,plains
 MONTANE_GRASSLANDS_SHRUBLANDS,60,*,stony_peaks
-MONTANE_GRASSLANDS_SHRUBLANDS,90,ET,snowy_plains
 MONTANE_GRASSLANDS_SHRUBLANDS,90,*,swamp
-MONTANE_GRASSLANDS_SHRUBLANDS,100,ET,snowy_plains
 MONTANE_GRASSLANDS_SHRUBLANDS,100,*,meadow
 # Tundra.
 TUNDRA,10,*,grove
