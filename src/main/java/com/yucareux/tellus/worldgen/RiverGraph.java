@@ -21,7 +21,9 @@ final class RiverGraph {
    final int[] cellX, cellZ;
    /** Sample points of the lines in each cell: midpoints of the pieces of line inside it, with the piece's direction. */
    final int[] sampleStart;
-   final float[] sampleX, sampleZ, sampleDirX, sampleDirZ;
+   // Absolute coordinates can exceed float's single-block precision at Earth scale.
+   final double[] sampleX, sampleZ;
+   final float[] sampleDirX, sampleDirZ;
    /** Lowest feature id among the lines through the cell, and how many distinct ones pass. */
    final long[] feature;
    final int[] featureCount;
@@ -30,7 +32,7 @@ final class RiverGraph {
    final int[] downStart, down, upStart, up;
    private final Long2IntOpenHashMap index;
 
-   private RiverGraph(int cellSize, int count, int[] cellX, int[] cellZ, int[] sampleStart, float[] sampleX, float[] sampleZ,
+   private RiverGraph(int cellSize, int count, int[] cellX, int[] cellZ, int[] sampleStart, double[] sampleX, double[] sampleZ,
       float[] sampleDirX, float[] sampleDirZ, long[] feature, int[] featureCount, float[] halfWidth,
       int[] downStart, int[] down, int[] upStart, int[] up, Long2IntOpenHashMap index) {
       this.cellSize = cellSize; this.count = count; this.cellX = cellX; this.cellZ = cellZ;
@@ -67,7 +69,7 @@ final class RiverGraph {
       private final int cellSize;
       private final Long2IntOpenHashMap index = new Long2IntOpenHashMap();
       private final IntArrayList cellX = new IntArrayList(), cellZ = new IntArrayList();
-      private final java.util.ArrayList<float[]> samples = new java.util.ArrayList<>();
+      private final java.util.ArrayList<double[]> samples = new java.util.ArrayList<>();
       private final LongArrayList feature = new LongArrayList();
       private final java.util.ArrayList<LongOpenHashSet> features = new java.util.ArrayList<>();
       private final it.unimi.dsi.fastutil.floats.FloatArrayList halfWidth = new it.unimi.dsi.fastutil.floats.FloatArrayList();
@@ -126,7 +128,7 @@ final class RiverGraph {
             double tOut = Math.min(1.0, Math.min(tMaxX, tMaxZ));
             int cell = cell(cx, cz);
             double mid = (tIn + tOut) * 0.5;
-            if (tOut > tIn) addSample(cell, (float)(ax + dx * mid), (float)(az + dz * mid), ux, uz);
+            if (tOut > tIn) addSample(cell, ax + dx * mid, az + dz * mid, ux, uz);
             addFeature(cell, featureId, lineHalfWidth);
             if (previous >= 0 && previous != cell) links.add((long)previous << 32 | cell & 0xFFFFFFFFL);
             previous = cell;
@@ -145,18 +147,18 @@ final class RiverGraph {
          cell = cellX.size();
          index.put(key, cell);
          cellX.add(cx); cellZ.add(cz);
-         samples.add(new float[0]);
+         samples.add(new double[0]);
          feature.add(Long.MAX_VALUE);
          features.add(null);
          halfWidth.add(0.0F);
          return cell;
       }
 
-      private void addSample(int cell, float x, float z, float ux, float uz) {
-         float[] current = samples.get(cell);
+      private void addSample(int cell, double x, double z, float ux, float uz) {
+         double[] current = samples.get(cell);
          int n = current.length / 4;
          // Keep a deterministic subset: the samples with the smallest (x, z), whatever order lines arrive in.
-         float[] next = Arrays.copyOf(current, current.length + 4);
+         double[] next = Arrays.copyOf(current, current.length + 4);
          next[n * 4] = x; next[n * 4 + 1] = z; next[n * 4 + 2] = ux; next[n * 4 + 3] = uz;
          samples.set(cell, next);
       }
@@ -172,18 +174,19 @@ final class RiverGraph {
       RiverGraph build() {
          int count = cellX.size();
          int[] sampleStart = new int[count + 1];
-         float[][] kept = new float[count][];
+         double[][] kept = new double[count][];
          for (int c = 0; c < count; c++) {
             kept[c] = canonicalSamples(samples.get(c));
             sampleStart[c + 1] = sampleStart[c] + kept[c].length / 4;
          }
          int total = sampleStart[count];
-         float[] sx = new float[total], sz = new float[total], ux = new float[total], uz = new float[total];
+         double[] sx = new double[total], sz = new double[total];
+         float[] ux = new float[total], uz = new float[total];
          for (int c = 0; c < count; c++) {
-            float[] s = kept[c];
+            double[] s = kept[c];
             for (int k = 0; k < s.length / 4; k++) {
                int at = sampleStart[c] + k;
-               sx[at] = s[k * 4]; sz[at] = s[k * 4 + 1]; ux[at] = s[k * 4 + 2]; uz[at] = s[k * 4 + 3];
+               sx[at] = s[k * 4]; sz[at] = s[k * 4 + 1]; ux[at] = (float)s[k * 4 + 2]; uz[at] = (float)s[k * 4 + 3];
             }
          }
          int[] featureCount = new int[count];
@@ -207,19 +210,19 @@ final class RiverGraph {
       }
 
       /** Distinct samples ordered by position, thinned evenly to {@link #MAX_SAMPLES}. */
-      private static float[] canonicalSamples(float[] raw) {
+      private static double[] canonicalSamples(double[] raw) {
          int n = raw.length / 4;
          Integer[] order = new Integer[n];
          for (int i = 0; i < n; i++) order[i] = i;
          Arrays.sort(order, (a, b) -> {
-            int c = Float.compare(raw[a * 4], raw[b * 4]);
+            int c = Double.compare(raw[a * 4], raw[b * 4]);
             if (c != 0) return c;
-            c = Float.compare(raw[a * 4 + 1], raw[b * 4 + 1]);
+            c = Double.compare(raw[a * 4 + 1], raw[b * 4 + 1]);
             if (c != 0) return c;
-            c = Float.compare(raw[a * 4 + 2], raw[b * 4 + 2]);
-            return c != 0 ? c : Float.compare(raw[a * 4 + 3], raw[b * 4 + 3]);
+            c = Double.compare(raw[a * 4 + 2], raw[b * 4 + 2]);
+            return c != 0 ? c : Double.compare(raw[a * 4 + 3], raw[b * 4 + 3]);
          });
-         float[] distinct = new float[raw.length];
+         double[] distinct = new double[raw.length];
          int kept = 0;
          for (int i = 0; i < n; i++) {
             int s = order[i] * 4;
@@ -228,7 +231,7 @@ final class RiverGraph {
             kept++;
          }
          if (kept <= MAX_SAMPLES) return Arrays.copyOf(distinct, kept * 4);
-         float[] thinned = new float[MAX_SAMPLES * 4];
+         double[] thinned = new double[MAX_SAMPLES * 4];
          for (int k = 0; k < MAX_SAMPLES; k++) {
             int pick = (int)((long)k * (kept - 1) / (MAX_SAMPLES - 1));
             System.arraycopy(distinct, pick * 4, thinned, k * 4, 4);

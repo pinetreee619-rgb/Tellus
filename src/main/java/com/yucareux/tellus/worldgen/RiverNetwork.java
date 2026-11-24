@@ -351,7 +351,7 @@ final class RiverNetwork {
    private void observe(RiverGraph graph, double[] ground, double[] fixed, List<HydrologyWaterMap.Shape> oceans) {
       int[] xs = new int[graph.sampleX.length], zs = new int[xs.length];
       double[] values = new double[RiverGraph.MAX_SAMPLES];
-      for (int s = 0; s < graph.sampleX.length; s++) { xs[s] = Math.round(graph.sampleX[s]); zs[s] = Math.round(graph.sampleZ[s]); }
+      for (int s = 0; s < graph.sampleX.length; s++) { xs[s] = (int)Math.round(graph.sampleX[s]); zs[s] = (int)Math.round(graph.sampleZ[s]); }
       sampler.preloadAtResolution(xs, zs, xs.length, terrainMeters);
       // Only cells near the sea can reach the coastal band, whose water levels are fixed outlets.
       double coast = COAST_REACH + cellSize;
