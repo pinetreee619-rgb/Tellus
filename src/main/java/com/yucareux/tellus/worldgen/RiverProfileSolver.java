@@ -108,7 +108,8 @@ final class RiverProfileSolver {
    static final class Ball {
       int[] cells;
       private double[] distance;
-      private int[] heap;
+      private final int[] heap;
+      private final int[] heapPosition;
       private int heapSize;
       private int[] stamp;
       private int epoch;
@@ -116,7 +117,8 @@ final class RiverProfileSolver {
       Ball(int count) {
          cells = new int[Math.max(1, count)];
          distance = new double[Math.max(1, count)];
-         heap = new int[Math.max(4, count * 2)];
+         heap = new int[Math.max(1, count)];
+         heapPosition = new int[Math.max(1, count)];
          stamp = new int[Math.max(1, count)];
       }
 
@@ -127,10 +129,9 @@ final class RiverProfileSolver {
          heapSize = 0;
          distance[start] = 0.0;
          stamp[start] = epoch;
-         push(start);
+         add(start);
          while (heapSize > 0) {
             int c = pop();
-            if (stamp[c] == -epoch) continue;
             stamp[c] = -epoch;
             cells[n++] = c;
             if (upstream) for (int k = graph.upStart[c]; k < graph.upStart[c + 1]; k++) relax(graph, c, graph.up[k], radius);
@@ -143,35 +144,54 @@ final class RiverProfileSolver {
          if (stamp[to] == -epoch) return;
          double d = distance[from] + graph.linkLength(from, to);
          if (d > radius) return;
-         if (stamp[to] != epoch || d < distance[to]) {
+         if (stamp[to] != epoch) {
             stamp[to] = epoch;
             distance[to] = d;
-            push(to);
+            add(to);
+         } else if (d < distance[to]) {
+            distance[to] = d;
+            siftUp(heapPosition[to]);
          }
       }
 
-      private void push(int cell) {
-         if (heapSize == heap.length) heap = Arrays.copyOf(heap, heap.length * 2);
+      // One entry per discovered cell. A shorter path updates that entry in place
+      // rather than changing the sort key of an older duplicate in the heap.
+      private void add(int cell) {
          int i = heapSize++;
          heap[i] = cell;
+         heapPosition[cell] = i;
+         siftUp(i);
+      }
+
+      private void siftUp(int i) {
          while (i > 0) {
             int parent = (i - 1) >>> 1;
             if (distance[heap[parent]] <= distance[heap[i]]) break;
-            int t = heap[parent]; heap[parent] = heap[i]; heap[i] = t;
+            swap(parent, i);
             i = parent;
          }
       }
 
+      private void swap(int a, int b) {
+         int cell = heap[a];
+         heap[a] = heap[b];
+         heap[b] = cell;
+         heapPosition[heap[a]] = a;
+         heapPosition[heap[b]] = b;
+      }
+
       private int pop() {
          int top = heap[0];
-         heap[0] = heap[--heapSize];
+         if (--heapSize == 0) return top;
+         heap[0] = heap[heapSize];
+         heapPosition[heap[0]] = 0;
          int i = 0;
          while (true) {
             int l = i * 2 + 1, r = l + 1, m = i;
             if (l < heapSize && distance[heap[l]] < distance[heap[m]]) m = l;
             if (r < heapSize && distance[heap[r]] < distance[heap[m]]) m = r;
             if (m == i) break;
-            int t = heap[m]; heap[m] = heap[i]; heap[i] = t;
+            swap(m, i);
             i = m;
          }
          return top;
