@@ -11,10 +11,10 @@ public final class ElevationGridRepair {
       if (elevations == null || missing == null || width <= 0 || height <= 0) {
          throw new IllegalArgumentException("Invalid elevation grid");
       }
-      int size = width * height;
-      if (elevations.length != size || missing.length != size) {
+      if ((long)width * height != elevations.length || missing.length != elevations.length) {
          throw new IllegalArgumentException("Elevation grid dimensions do not match its storage");
       }
+      int size = elevations.length;
 
       boolean anyMissing = false;
       boolean anyValid = false;
@@ -87,8 +87,11 @@ public final class ElevationGridRepair {
       }
 
       // Handles unusual diagonal-only coverage without introducing a zero-height patch.
-      double[] next = Arrays.copyOf(elevations, size);
+      double[] next = new double[size];
       while (true) {
+         // Only cells actually reached in this pass may become resolved. A missing cell
+         // can still contain a finite placeholder, which must never be treated as a sample.
+         Arrays.fill(next, Double.NaN);
          int repaired = 0;
          for (int z = 0; z < height; z++) {
             for (int x = 0; x < width; x++) {
