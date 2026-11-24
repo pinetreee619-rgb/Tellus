@@ -89,6 +89,35 @@ class ResolveBiomeClassificationTest {
    }
 
    @Test
+   void borealOpenLandHandlesAllColdSummerAndSevereWinterClimateCodes() {
+      ResolveEcoregion boreal = ecoregion(1, "Boreal forest", ResolveBiome.BOREAL_FORESTS_TAIGA);
+      for (String climate : new String[]{"Dfc", "Dfd", "Dwc", "Dwd", "Dsc", "Dsd"}) {
+         assertEquals(Biomes.SNOWY_TAIGA, ResolveBiomeClassification.findBiomeKey(10, climate, boreal), climate);
+         for (int cover : new int[]{20, 30}) {
+            assertEquals(Biomes.SNOWY_PLAINS, ResolveBiomeClassification.findBiomeKey(cover, climate, boreal), climate);
+         }
+      }
+      for (String climate : new String[]{"Dfa", "Dfb", "Dwa", "Dwb", "Dsa", "Dsb"}) {
+         assertEquals(Biomes.TAIGA, ResolveBiomeClassification.findBiomeKey(10, climate, boreal), climate);
+         assertEquals(Biomes.MEADOW, ResolveBiomeClassification.findBiomeKey(20, climate, boreal), climate);
+         assertEquals(Biomes.MEADOW, ResolveBiomeClassification.findBiomeKey(30, climate, boreal), climate);
+      }
+   }
+
+   @Test
+   void montaneTundraDoesNotBecomeTemperateMeadowOrSwamp() {
+      ResolveEcoregion montane = ecoregion(2, "Montane grasslands", ResolveBiome.MONTANE_GRASSLANDS_SHRUBLANDS);
+      for (int cover : new int[]{20, 30, 90, 100}) {
+         assertEquals(Biomes.SNOWY_PLAINS, ResolveBiomeClassification.findBiomeKey(cover, "ET", montane));
+      }
+      assertEquals(Biomes.WINDSWEPT_HILLS, ResolveBiomeClassification.findBiomeKey(20, "Cwb", montane));
+      assertEquals(Biomes.MEADOW, ResolveBiomeClassification.findBiomeKey(30, "Cwb", montane));
+      assertEquals(Biomes.SWAMP, ResolveBiomeClassification.findBiomeKey(90, "Cwb", montane));
+      assertEquals(Biomes.MEADOW, ResolveBiomeClassification.findBiomeKey(100, "Cwb", montane));
+      assertEquals(Biomes.STONY_PEAKS, ResolveBiomeClassification.findBiomeKey(60, "ET", montane));
+   }
+
+   @Test
    void distinguishesResolveRockAndIceFromUnknownCoverage() {
       ResolveEcoregion rockAndIce = ecoregion(0, "Rock and Ice", ResolveBiome.ROCK_AND_ICE);
 
