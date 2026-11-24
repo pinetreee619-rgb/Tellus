@@ -300,14 +300,13 @@ public final class TellusCanopyHeightSource implements TellusCacheHandle {
    }
 
    private int sampleGlobalPixel(int level, long globalPixelX, long globalPixelY, LookupMode lookupMode) {
-      if (globalPixelX < 0L || globalPixelY < 0L) {
+      TileKey key = tileKeyForPixel(level, globalPixelX, globalPixelY);
+      if (key == null) {
          return -1;
       }
-      int tileColumn = (int)Math.floorDiv(globalPixelX, TILE_SIZE);
-      int tileRow = (int)Math.floorDiv(globalPixelY, TILE_SIZE);
       int pixelX = (int)Math.floorMod(globalPixelX, TILE_SIZE);
       int pixelY = (int)Math.floorMod(globalPixelY, TILE_SIZE);
-      RasterTile tile = this.tile(new TileKey(level, tileRow, tileColumn), lookupMode);
+      RasterTile tile = this.tile(key, lookupMode);
       return tile == null ? -1 : tile.sample(pixelX, pixelY);
    }
 
@@ -485,13 +484,21 @@ public final class TellusCanopyHeightSource implements TellusCacheHandle {
 
    static TileKey tileKey(double longitude, double latitude, int level) {
       PixelPosition position = pixelPosition(longitude, latitude, level);
-      return position == null
-         ? null
-         : new TileKey(
-            level,
-            (int)Math.floorDiv(position.globalPixelY(), TILE_SIZE),
-            (int)Math.floorDiv(position.globalPixelX(), TILE_SIZE)
-         );
+      return position == null ? null : tileKeyForPixel(level, position.globalPixelX(), position.globalPixelY());
+   }
+
+   static TileKey tileKeyForPixel(int level, long x, long y) {
+      if (level < MIN_LEVEL || level > NATIVE_LEVEL || x < 0 || y < 0
+         || x >= pixelCount(360, level) || y >= pixelCount(144, level)) {
+         return null;
+      }
+      return new TileKey(level, (int)(y / TILE_SIZE), (int)(x / TILE_SIZE));
+   }
+
+   private static long pixelCount(int extentDegrees, int level) {
+      long nativePixels = extentDegrees * 12000L;
+      long divisor = 1L << (NATIVE_LEVEL - level);
+      return (nativePixels + divisor - 1) / divisor;
    }
 
    private static PixelPosition pixelPosition(double longitude, double latitude, int level) {
@@ -501,7 +508,11 @@ public final class TellusCanopyHeightSource implements TellusCacheHandle {
       double resolution = resolutionDegrees(level);
       long pixelX = (long)Math.floor((longitude - ORIGIN_LONGITUDE) / resolution);
       long pixelY = (long)Math.floor((ORIGIN_LATITUDE - latitude) / resolution);
-      return pixelX < 0L || pixelY < 0L ? null : new PixelPosition(pixelX, pixelY);
+      // A coordinate just inside the coverage boundary can round to the next pixel.
+      return new PixelPosition(
+         Math.max(0L, Math.min(pixelCount(360, level) - 1, pixelX)),
+         Math.max(0L, Math.min(pixelCount(144, level) - 1, pixelY))
+      );
    }
 
    private static List<TileKey> tileKeysForArea(
@@ -531,11 +542,17 @@ public final class TellusCanopyHeightSource implements TellusCacheHandle {
       TileKey southEast;
       long tileCount;
       do {
-         northWest = tileKey(minLon, maxLat, level);
-         southEast = tileKey(maxLon, minLat, level);
-         if (northWest == null || southEast == null) {
+         PixelPosition firstPixel = pixelPosition(minLon, maxLat, level);
+         PixelPosition lastPixel = pixelPosition(maxLon, minLat, level);
+         if (firstPixel == null || lastPixel == null) {
             return List.of();
          }
+         // sampleCanopy reads a one-pixel halo around each center. Include it in
+         // both the prefetch and tile budget, without requesting outside coverage.
+         northWest = tileKeyForPixel(level, Math.max(0, firstPixel.globalPixelX() - 1),
+            Math.max(0, firstPixel.globalPixelY() - 1));
+         southEast = tileKeyForPixel(level, Math.min(pixelCount(360, level) - 1, lastPixel.globalPixelX() + 1),
+            Math.min(pixelCount(144, level) - 1, lastPixel.globalPixelY() + 1));
          tileCount = (long)(southEast.row() - northWest.row() + 1)
             * (long)(southEast.column() - northWest.column() + 1);
          if (tileCount <= MAX_AREA_TILE_COUNT || level == MIN_LEVEL) {
