@@ -2,9 +2,11 @@ package com.yucareux.tellus.integration.distant_horizons;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
@@ -26,6 +28,8 @@ final class LodPrefetchBatcher implements AutoCloseable {
    private final int maxRequestsPerBatch;
    private final PrefetchStarter starter;
    private final Map<GroupKey, List<PendingRequest>> pendingByGroup = new HashMap<>();
+   // Includes requests detached from the collection window and active source reads.
+   private final Set<Submission> outstanding = new HashSet<>();
    private ScheduledFuture<?> scheduledFlush;
    private boolean closed;
 
@@ -47,6 +51,7 @@ final class LodPrefetchBatcher implements AutoCloseable {
             pending.submission.future.completeExceptionally(new CancellationException("LOD prefetch batcher is closed"));
             return pending.submission;
          }
+         this.track(pending.submission);
          this.pendingByGroup.computeIfAbsent(GroupKey.forRequest(request), ignored -> new ArrayList<>()).add(pending);
          if (this.scheduledFlush == null) {
             this.scheduledFlush = SCHEDULER.schedule(this::flushNow, this.collectionWindowMillis, TimeUnit.MILLISECONDS);
@@ -57,14 +62,26 @@ final class LodPrefetchBatcher implements AutoCloseable {
 
    Submission submitImmediately(Request request) {
       Objects.requireNonNull(request, "request");
+      Submission submission = new Submission();
       synchronized (this.lock) {
          if (this.closed) {
-            Submission submission = new Submission();
             submission.future.completeExceptionally(new CancellationException("LOD prefetch batcher is closed"));
             return submission;
          }
+         this.track(submission);
       }
-      return directSubmission(request, this.starter);
+      directSubmission(request, this.starter, submission);
+      return submission;
+   }
+
+   /** Called with lock held. Completed requests never accumulate in the tracking set. */
+   private void track(Submission submission) {
+      this.outstanding.add(submission);
+      submission.future.whenComplete((ignored, error) -> {
+         synchronized (this.lock) {
+            this.outstanding.remove(submission);
+         }
+      });
    }
 
    static Submission completedSubmission() {
@@ -131,6 +148,9 @@ final class LodPrefetchBatcher implements AutoCloseable {
       }
 
       for (Cluster cluster : clusters) {
+         if (cluster.requests.stream().allMatch(pending -> pending.submission.future.isCancelled())) {
+            continue;
+         }
          Request batchedRequest = cluster.requests.get(0).request.withRange(cluster.range);
          CompletableFuture<Void> sharedFuture;
          try {
@@ -164,7 +184,7 @@ final class LodPrefetchBatcher implements AutoCloseable {
 
    @Override
    public void close() {
-      List<PendingRequest> pending = new ArrayList<>();
+      List<Submission> cancel;
       synchronized (this.lock) {
          if (this.closed) {
             return;
@@ -174,19 +194,20 @@ final class LodPrefetchBatcher implements AutoCloseable {
             this.scheduledFlush.cancel(false);
             this.scheduledFlush = null;
          }
-         for (List<PendingRequest> group : this.pendingByGroup.values()) {
-            pending.addAll(group);
-         }
+         cancel = new ArrayList<>(this.outstanding);
+         this.outstanding.clear();
          this.pendingByGroup.clear();
       }
-      CancellationException cancellation = new CancellationException("LOD prefetch batcher closed");
-      for (PendingRequest request : pending) {
-         request.submission.future.completeExceptionally(cancellation);
+      // Complete outside the lock: cancellation may synchronously run source callbacks.
+      for (Submission submission : cancel) {
+         submission.future.cancel(true);
       }
    }
 
-   private static Submission directSubmission(Request request, PrefetchStarter starter) {
-      Submission submission = new Submission();
+   private static void directSubmission(Request request, PrefetchStarter starter, Submission submission) {
+      if (submission.future.isCancelled()) {
+         return;
+      }
       CompletableFuture<Void> future;
       try {
          future = Objects.requireNonNull(starter.start(request), "prefetch future");
@@ -206,7 +227,6 @@ final class LodPrefetchBatcher implements AutoCloseable {
             submission.future.completeExceptionally(error);
          }
       });
-      return submission;
    }
 
    private static boolean touchesOrOverlaps(LodBlockRange a, LodBlockRange b) {

@@ -9,6 +9,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 
 class LodPrefetchBatcherTest {
@@ -185,6 +189,62 @@ class LodPrefetchBatcherTest {
       batcher.close();
 
       assertTrue(submission.future().isCompletedExceptionally());
+   }
+
+   @Test
+   void closeCancelsActiveSharedAndImmediatePrefetches() {
+      CompletableFuture<Void> shared = new CompletableFuture<>();
+      CompletableFuture<Void> immediate = new CompletableFuture<>();
+      try (LodPrefetchBatcher batcher = new LodPrefetchBatcher(60_000L, 4,
+         req -> req.detailLevel() == 2 ? shared : immediate)) {
+         var first = batcher.submit(request(new LodBlockRange(0, 0, 63, 63), 2));
+         var second = batcher.submit(request(new LodBlockRange(64, 0, 127, 63), 2));
+         batcher.flushNow();
+         var direct = batcher.submitImmediately(request(new LodBlockRange(0, 0, 63, 63), 3));
+         var pending = batcher.submit(request(new LodBlockRange(0, 0, 63, 63), 4));
+
+         batcher.close();
+
+         assertTrue(first.future().isCancelled());
+         assertTrue(second.future().isCancelled());
+         assertTrue(direct.future().isCancelled());
+         assertTrue(pending.future().isCancelled());
+         assertTrue(shared.isCancelled());
+         assertTrue(immediate.isCancelled());
+         assertTrue(batcher.submit(request(new LodBlockRange(0, 0, 63, 63), 2)).future().isCancelled());
+      }
+   }
+
+   @Test
+   void closeDuringStarterCancelsSourceWhenItBecomesAvailable() throws Exception {
+      CountDownLatch entered = new CountDownLatch(1);
+      CountDownLatch release = new CountDownLatch(1);
+      CompletableFuture<Void> source = new CompletableFuture<>();
+      ExecutorService executor = Executors.newSingleThreadExecutor();
+      try (LodPrefetchBatcher batcher = new LodPrefetchBatcher(60_000L, 4, req -> {
+         entered.countDown();
+         try {
+            if (!release.await(5, TimeUnit.SECONDS)) {
+               throw new IllegalStateException("starter not released");
+            }
+         } catch (InterruptedException error) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(error);
+         }
+         return source;
+      })) {
+         var submission = batcher.submit(request(new LodBlockRange(0, 0, 63, 63), 2));
+         var flush = executor.submit(batcher::flushNow);
+         assertTrue(entered.await(5, TimeUnit.SECONDS));
+         batcher.close();
+         assertTrue(submission.future().isCancelled());
+         release.countDown();
+         flush.get(5, TimeUnit.SECONDS);
+         assertTrue(source.isCancelled());
+      } finally {
+         release.countDown();
+         executor.shutdownNow();
+      }
    }
 
    private static LodPrefetchBatcher.Request request(LodBlockRange range, int detail) {
