@@ -1061,7 +1061,7 @@ public final class TellusProceduralTreeGenerator {
       }
    }
 
-   private static void placeLogLine(
+   static void placeLogLine(
       TreePlacement tree,
       int startX,
       int startY,
@@ -1080,12 +1080,26 @@ public final class TellusProceduralTreeGenerator {
          ? Direction.Axis.Y
          : Math.abs(dx) >= Math.abs(dz) ? Direction.Axis.X : Direction.Axis.Z;
       BlockState oriented = axis(log, branchAxis);
+      int previousX = startX, previousY = startY, previousZ = startZ;
+      BlockPos.MutableBlockPos bridge = new BlockPos.MutableBlockPos();
       for (int step = 0; step <= steps; step++) {
          double progress = step / (double)steps;
          int x = (int)Math.round(startX + dx * progress);
          int y = (int)Math.round(startY + dy * progress);
          int z = (int)Math.round(startZ + dz * progress);
+         // Each rounded axis moves at most one block per step. Bridge any
+         // simultaneous axis changes with face-connected wood, using a stable
+         // axis order. Keep the original discs and branch orientation.
+         if (previousY != y && (previousX != x || previousZ != z)) {
+            tree.setLog(bridge.set(previousX, y, previousZ), oriented);
+         }
+         if (previousX != x && previousZ != z) {
+            tree.setLog(bridge.set(x, y, previousZ), oriented);
+         }
          placeLogDisc(tree, x, y, z, radius, oriented);
+         previousX = x;
+         previousY = y;
+         previousZ = z;
       }
    }
 
