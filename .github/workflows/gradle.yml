@@ -34,8 +34,13 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5
 
-      - name: Build and test every target
+      - name: Build and test every target on main
+        if: github.ref == 'refs/heads/main'
         run: ./gradlew build --stacktrace
+
+      - name: Build and test Minecraft 26.2 and 26.3 Fabric
+        if: github.ref != 'refs/heads/main'
+        run: ./gradlew -PtellusTargets=mc262,mc263 build --stacktrace
 
       - name: Collect installable Tellus JARs
         shell: bash
