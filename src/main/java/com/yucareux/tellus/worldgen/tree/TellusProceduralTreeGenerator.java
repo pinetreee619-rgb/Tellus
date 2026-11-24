@@ -286,7 +286,7 @@ public final class TellusProceduralTreeGenerator {
          case CHERRY -> growBroadleaf(tree, ground, plan, log, leaves, seed, 0.84);
          case POPLAR -> growBroadleaf(tree, ground, plan, log, leaves, seed, 0.72);
          case DARK_BROADLEAF, PALE_BROADLEAF -> growBroadleaf(tree, ground, plan, log, leaves, seed, 1.0);
-         case SWAMP, TEMPERATE_BROADLEAF -> growBroadleaf(tree, ground, plan, log, leaves, seed, 0.90);
+         case SWAMP, MANGROVE, TEMPERATE_BROADLEAF -> growBroadleaf(tree, ground, plan, log, leaves, seed, 0.90);
       }
       tree.finish();
       return true;
@@ -378,6 +378,7 @@ public final class TellusProceduralTreeGenerator {
       if (plan.trunkRadius() < 2
          && plan.profile() != Profile.TROPICAL
          && plan.profile() != Profile.SWAMP
+         && plan.profile() != Profile.MANGROVE
          && plan.profile() != Profile.COAST_REDWOOD) {
          return;
       }
@@ -1303,6 +1304,9 @@ public final class TellusProceduralTreeGenerator {
       if (biome.is(Biomes.DARK_FOREST)) {
          return Profile.DARK_BROADLEAF;
       }
+      if (biome.is(Biomes.MANGROVE_SWAMP)) {
+         return Profile.MANGROVE;
+      }
       if (biome.is(Biomes.SWAMP)) {
          return Profile.SWAMP;
       }
@@ -1345,7 +1349,10 @@ public final class TellusProceduralTreeGenerator {
       if (Biomes.DARK_FOREST.equals(biomeKey)) {
          return Profile.DARK_BROADLEAF;
       }
-      if (Biomes.SWAMP.equals(biomeKey) || Biomes.MANGROVE_SWAMP.equals(biomeKey)) {
+      if (Biomes.MANGROVE_SWAMP.equals(biomeKey)) {
+         return Profile.MANGROVE;
+      }
+      if (Biomes.SWAMP.equals(biomeKey)) {
          return Profile.SWAMP;
       }
       return Profile.TEMPERATE_BROADLEAF;
@@ -1393,6 +1400,7 @@ public final class TellusProceduralTreeGenerator {
             MinecraftVersionCompat.paleOakLeavesOr(Blocks.DARK_OAK_LEAVES)
          );
          case SWAMP -> new Palette(Blocks.OAK_LOG, Blocks.OAK_LEAVES);
+         case MANGROVE -> new Palette(Blocks.MANGROVE_LOG, Blocks.MANGROVE_LEAVES);
          case TEMPERATE_BROADLEAF -> (mix(seed) & 7L) == 0L
             ? new Palette(Blocks.BIRCH_LOG, Blocks.BIRCH_LEAVES)
             : new Palette(Blocks.OAK_LOG, Blocks.OAK_LEAVES);
@@ -1453,7 +1461,8 @@ public final class TellusProceduralTreeGenerator {
       MALLEE(5, 12, 20, 0.38, 3, 8, 0.25, 0.08, false),
       MEDITERRANEAN(8, 24, 38, 0.32, 3, 10, 0.48, 0.10, false),
       SAVANNA(7, 18, 30, 0.34, 3, 10, 0.56, 0.12, false),
-      SWAMP(10, 28, 48, 0.27, 3, 11, 0.42, 0.08, false);
+      SWAMP(10, 28, 48, 0.27, 3, 11, 0.42, 0.08, false),
+      MANGROVE(10, 28, 48, 0.27, 3, 11, 0.42, 0.08, false);
 
       private final int fallbackLow;
       private final int fallbackHigh;

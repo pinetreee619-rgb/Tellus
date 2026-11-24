@@ -9,7 +9,10 @@ import com.yucareux.tellus.world.data.canopy.TellusCanopyHeightSource;
 import com.yucareux.tellus.world.data.resolve.ResolveBiome;
 import com.yucareux.tellus.world.data.resolve.ResolveEcoregion;
 import com.yucareux.tellus.world.data.resolve.ResolveRealm;
+import com.yucareux.tellus.test.MinecraftTestRegistries;
 import net.minecraft.SharedConstants;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.level.biome.Biomes;
@@ -189,6 +192,33 @@ class TellusProceduralTreeGeneratorTest {
             Biomes.OLD_GROWTH_BIRCH_FOREST, ResolveEcoregion.UNKNOWN, null, 14L
          ).profile()
       );
+   }
+
+   @Test
+   void mangrovePlanningAgreesBetweenBiomeHoldersAndPreviewKeys() {
+      assumeFalse(isMinecraftForge(), "Forge's raw JUnit bootstrap cannot initialize vanilla biome registry keys");
+      SharedConstants.tryDetectVersion();
+      Bootstrap.bootStrap();
+      var biomes = MinecraftTestRegistries.create().lookupOrThrow(Registries.BIOME);
+      var canopy = canopy(18.0, 20.0, 24.0);
+      for (long seed = 0; seed < 32; seed++) {
+         var actual = TellusProceduralTreeGenerator.plan(
+            biomes.getOrThrow(Biomes.MANGROVE_SWAMP), ResolveEcoregion.UNKNOWN, canopy, seed
+         );
+         var preview = TellusProceduralTreeGenerator.plan(
+            Biomes.MANGROVE_SWAMP, ResolveEcoregion.UNKNOWN, canopy, seed
+         );
+         assertEquals(TellusProceduralTreeGenerator.Profile.MANGROVE, actual.profile());
+         assertEquals(actual, preview);
+         assertEquals(Blocks.MANGROVE_LOG, TellusProceduralTreeGenerator.logState(actual.profile(), seed).getBlock());
+         assertEquals(Blocks.MANGROVE_LEAVES, TellusProceduralTreeGenerator.leavesState(actual.profile(), seed).getBlock());
+         var ordinarySwamp = TellusProceduralTreeGenerator.plan(
+            biomes.getOrThrow(Biomes.SWAMP), ResolveEcoregion.UNKNOWN, canopy, seed
+         );
+         assertEquals(TellusProceduralTreeGenerator.Profile.SWAMP, ordinarySwamp.profile());
+         assertEquals(Blocks.OAK_LOG, TellusProceduralTreeGenerator.logState(ordinarySwamp.profile(), seed).getBlock());
+         assertEquals(Blocks.OAK_LEAVES, TellusProceduralTreeGenerator.leavesState(ordinarySwamp.profile(), seed).getBlock());
+      }
    }
 
    private static boolean isMinecraftForge() {
