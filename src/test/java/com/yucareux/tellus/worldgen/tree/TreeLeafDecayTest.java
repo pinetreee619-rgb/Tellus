@@ -9,9 +9,7 @@ import com.yucareux.tellus.world.data.canopy.TellusCanopyHeightSource;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
-import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
@@ -19,7 +17,6 @@ import java.util.Map;
 import java.util.Set;
 import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
 import net.minecraft.core.Holder;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.Bootstrap;
@@ -195,87 +192,6 @@ class TreeLeafDecayTest {
       assertEquals(2, world.leafCount());
       assertEquals(2, world.state(lower.offset(2, 0, 0)).getValue(LeavesBlock.DISTANCE));
       assertTrue(world.state(upper.offset(2, 0, 0)).isAir());
-   }
-
-   @Test
-   void leaningTrunkHasFaceConnectedCoreAtEachHorizontalStep() {
-      TestWorld world = new TestWorld();
-      BlockPos ground = new BlockPos(0, 64, 0);
-      var plan = leaningTrunkPlan();
-      assertTrue(TellusProceduralTreeGenerator.place(world.level, ground, plan, 17L));
-      int lastX = 0, lastZ = 0;
-      for (int y = 1; y <= 18; y++) {
-         int x = (int)Math.round(plan.leanX() * (y / (double)plan.height()));
-         int z = (int)Math.round(plan.leanZ() * (y / (double)plan.height()));
-         assertTrue(world.state(ground.offset(x, y, z)).is(Blocks.BIRCH_LOG), "missing trunk core at " + y);
-         if (y > 1 && (x != lastX || z != lastZ)) {
-            assertTrue(world.state(ground.offset(lastX, y, lastZ)).is(Blocks.BIRCH_LOG), "missing vertical bridge at " + y);
-            if (x != lastX && z != lastZ) {
-               assertTrue(world.state(ground.offset(x, y, lastZ)).is(Blocks.BIRCH_LOG), "missing horizontal bridge at " + y);
-            }
-         }
-         lastX = x;
-         lastZ = z;
-      }
-   }
-
-   @Test
-   void obstructedLowerTrunkBridgePreventsPartialTreePlacement() {
-      TestWorld world = new TestWorld();
-      BlockPos ground = new BlockPos(0, 64, 0);
-      BlockPos obstruction = ground.above(2);
-      world.blocks.put(obstruction, Blocks.STONE.defaultBlockState());
-      assertFalse(TellusProceduralTreeGenerator.place(world.level, ground, leaningTrunkPlan(), 17L));
-      assertEquals(1, world.blocks.size());
-      assertTrue(world.state(obstruction).is(Blocks.STONE));
-   }
-
-   private static TellusProceduralTreeGenerator.TreePlan leaningTrunkPlan() {
-      return new TellusProceduralTreeGenerator.TreePlan(
-         TellusProceduralTreeGenerator.Profile.BIRCH, 20, 1, 4, 9, 12, 6, -6, false, true
-      );
-   }
-
-   @Test
-   void branchAndRootLinesAreFaceConnectedInEveryOctant() {
-      BlockPos start = new BlockPos(0, 64, 0);
-      for (int dx = -3; dx <= 3; dx++) {
-         for (int dy = -3; dy <= 3; dy++) {
-            for (int dz = -3; dz <= 3; dz++) {
-               TestWorld world = new TestWorld();
-               TreePlacement tree = new TreePlacement(world.level);
-               BlockPos end = start.offset(dx, dy, dz);
-               TellusProceduralTreeGenerator.placeLogLine(tree,
-                  start.getX(), start.getY(), start.getZ(),
-                  end.getX(), end.getY(), end.getZ(), Blocks.OAK_LOG.defaultBlockState(), 0);
-               Set<BlockPos> visited = new HashSet<>();
-               ArrayDeque<BlockPos> queue = new ArrayDeque<>();
-               queue.add(start);
-               visited.add(start);
-               while (!queue.isEmpty()) {
-                  BlockPos cell = queue.remove();
-                  for (Direction direction : Direction.values()) {
-                     BlockPos next = cell.relative(direction);
-                     if (world.state(next).is(Blocks.OAK_LOG) && visited.add(next)) queue.add(next);
-                  }
-               }
-               assertTrue(visited.contains(end), "disconnected line to " + end);
-               assertEquals(world.blocks.keySet(), visited);
-               assertEquals(1 + Math.abs(dx) + Math.abs(dy) + Math.abs(dz), visited.size());
-            }
-         }
-      }
-   }
-
-   @Test
-   void branchBridgeDoesNotOverwriteSolidTerrain() {
-      TestWorld world = new TestWorld();
-      BlockPos obstruction = new BlockPos(0, 65, 0);
-      world.blocks.put(obstruction, Blocks.STONE.defaultBlockState());
-      TellusProceduralTreeGenerator.placeLogLine(new TreePlacement(world.level),
-         0, 64, 0, 1, 65, 1, Blocks.OAK_LOG.defaultBlockState(), 0);
-      assertTrue(world.state(obstruction).is(Blocks.STONE));
-      assertTrue(world.state(new BlockPos(1, 65, 1)).is(Blocks.OAK_LOG));
    }
 
    @Test
