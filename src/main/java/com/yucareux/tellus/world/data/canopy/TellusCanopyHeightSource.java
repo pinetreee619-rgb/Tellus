@@ -208,7 +208,7 @@ public final class TellusCanopyHeightSource implements TellusCacheHandle {
       int maxTileCount
    ) {
       double resolutionMeters = finitePositive(requestedResolutionMeters, worldScale);
-      int tileBudget = Math.max(1, maxTileCount);
+      int tileBudget = Math.max(1, Math.min(MAX_AREA_TILE_COUNT, maxTileCount));
       for (int overviewStep = 0; overviewStep <= NATIVE_LEVEL + 4; overviewStep++) {
          if (areaTileCount(
                minBlockX,
@@ -220,7 +220,9 @@ public final class TellusCanopyHeightSource implements TellusCacheHandle {
             ) <= tileBudget) {
             break;
          }
-         resolutionMeters *= 2.0;
+         // All finer-than-native requests use the same native overview. Jump
+         // directly to the next useful resolution rather than repeatedly halving a tiny scale.
+         resolutionMeters = Math.max(resolutionMeters, NATIVE_RESOLUTION_METERS * 3.0) * 2.0;
          if (!Double.isFinite(resolutionMeters)) {
             return Double.MAX_VALUE;
          }
@@ -236,7 +238,9 @@ public final class TellusCanopyHeightSource implements TellusCacheHandle {
       double worldScale,
       double previewResolutionMeters
    ) {
-      return tileKeysForArea(minBlockX, minBlockZ, maxBlockX, maxBlockZ, worldScale, previewResolutionMeters).size();
+      TileRange range = tileRangeForArea(minBlockX, minBlockZ, maxBlockX, maxBlockZ, worldScale,
+         levelForResolution(worldScale, previewResolutionMeters));
+      return range == null ? 0 : (int)Math.min(Integer.MAX_VALUE, range.count());
    }
 
    public int preloadAreaInputs(
@@ -516,58 +520,55 @@ public final class TellusCanopyHeightSource implements TellusCacheHandle {
    }
 
    private static List<TileKey> tileKeysForArea(
-      int minBlockX,
-      int minBlockZ,
-      int maxBlockX,
-      int maxBlockZ,
-      double worldScale,
-      double previewResolutionMeters
+      int minBlockX, int minBlockZ, int maxBlockX, int maxBlockZ,
+      double worldScale, double previewResolutionMeters
    ) {
-      GeoPoint first = geoPoint(Math.min(minBlockX, maxBlockX), Math.min(minBlockZ, maxBlockZ), worldScale);
-      GeoPoint second = geoPoint(Math.max(minBlockX, maxBlockX), Math.max(minBlockZ, maxBlockZ), worldScale);
-      if (first == null || second == null) {
-         return List.of();
-      }
-
-      double minLon = Math.max(-180.0, Math.min(first.longitude(), second.longitude()));
-      double maxLon = Math.min(Math.nextDown(180.0), Math.max(first.longitude(), second.longitude()));
-      double minLat = Math.max(MIN_LATITUDE, Math.min(first.latitude(), second.latitude()));
-      double maxLat = Math.min(Math.nextDown(MAX_LATITUDE), Math.max(first.latitude(), second.latitude()));
-      if (minLon > maxLon || minLat > maxLat) {
-         return List.of();
-      }
-
       int level = levelForResolution(worldScale, previewResolutionMeters);
-      TileKey northWest;
-      TileKey southEast;
-      long tileCount;
-      do {
-         PixelPosition firstPixel = pixelPosition(minLon, maxLat, level);
-         PixelPosition lastPixel = pixelPosition(maxLon, minLat, level);
-         if (firstPixel == null || lastPixel == null) {
-            return List.of();
-         }
-         // sampleCanopy reads a one-pixel halo around each center. Include it in
-         // both the prefetch and tile budget, without requesting outside coverage.
-         northWest = tileKeyForPixel(level, Math.max(0, firstPixel.globalPixelX() - 1),
-            Math.max(0, firstPixel.globalPixelY() - 1));
-         southEast = tileKeyForPixel(level, Math.min(pixelCount(360, level) - 1, lastPixel.globalPixelX() + 1),
-            Math.min(pixelCount(144, level) - 1, lastPixel.globalPixelY() + 1));
-         tileCount = (long)(southEast.row() - northWest.row() + 1)
-            * (long)(southEast.column() - northWest.column() + 1);
-         if (tileCount <= MAX_AREA_TILE_COUNT || level == MIN_LEVEL) {
-            break;
-         }
+      TileRange range;
+      while (true) {
+         range = tileRangeForArea(minBlockX, minBlockZ, maxBlockX, maxBlockZ, worldScale, level);
+         if (range == null) return List.of();
+         if (range.count() <= MAX_AREA_TILE_COUNT || level == MIN_LEVEL) break;
          level--;
-      } while (true);
-
-      List<TileKey> keys = new ArrayList<>((int)Math.min(Integer.MAX_VALUE, tileCount));
-      for (int row = northWest.row(); row <= southEast.row(); row++) {
-         for (int column = northWest.column(); column <= southEast.column(); column++) {
+      }
+      List<TileKey> keys = new ArrayList<>((int)range.count());
+      for (int row = range.northWest().row(); row <= range.southEast().row(); row++) {
+         for (int column = range.northWest().column(); column <= range.southEast().column(); column++) {
             keys.add(new TileKey(level, row, column));
          }
       }
       return List.copyOf(keys);
+   }
+
+   /** Exact requested-level bounds, without creating tile keys for every cell. */
+   private static TileRange tileRangeForArea(
+      int minBlockX, int minBlockZ, int maxBlockX, int maxBlockZ,
+      double worldScale, int level
+   ) {
+      GeoPoint first = geoPoint(Math.min(minBlockX, maxBlockX), Math.min(minBlockZ, maxBlockZ), worldScale);
+      GeoPoint second = geoPoint(Math.max(minBlockX, maxBlockX), Math.max(minBlockZ, maxBlockZ), worldScale);
+      if (first == null || second == null) return null;
+      double minLon = Math.max(-180.0, Math.min(first.longitude(), second.longitude()));
+      double maxLon = Math.min(Math.nextDown(180.0), Math.max(first.longitude(), second.longitude()));
+      double minLat = Math.max(MIN_LATITUDE, Math.min(first.latitude(), second.latitude()));
+      double maxLat = Math.min(Math.nextDown(MAX_LATITUDE), Math.max(first.latitude(), second.latitude()));
+      if (minLon > maxLon || minLat > maxLat) return null;
+      PixelPosition firstPixel = pixelPosition(minLon, maxLat, level);
+      PixelPosition lastPixel = pixelPosition(maxLon, minLat, level);
+      if (firstPixel == null || lastPixel == null) return null;
+      // Include all of the one-pixel neighbourhood used by sampleCanopy.
+      TileKey northWest = tileKeyForPixel(level, Math.max(0, firstPixel.globalPixelX() - 1),
+         Math.max(0, firstPixel.globalPixelY() - 1));
+      TileKey southEast = tileKeyForPixel(level, Math.min(pixelCount(360, level) - 1, lastPixel.globalPixelX() + 1),
+         Math.min(pixelCount(144, level) - 1, lastPixel.globalPixelY() + 1));
+      return new TileRange(northWest, southEast);
+   }
+
+   private record TileRange(TileKey northWest, TileKey southEast) {
+      long count() {
+         return (long)(southEast.row() - northWest.row() + 1)
+            * (southEast.column() - northWest.column() + 1);
+      }
    }
 
    private static GeoPoint geoPoint(double blockX, double blockZ, double worldScale) {

@@ -50,6 +50,27 @@ class TellusCanopyHeightSourceTest {
    }
 
    @Test
+   void countsRequestedLevelRatherThanSilentlyCappedPrefetchLevel() {
+      int extent = 1_000_000;
+      int nativeCount = TellusCanopyHeightSource.areaTileCount(-extent, -extent, extent, extent, 1.0, 1.0);
+      assertTrue(nativeCount > 100_000);
+      double adjusted = TellusCanopyHeightSource.resolutionForAreaTileBudget(
+         -extent, -extent, extent, extent, 1.0, 1.0, 4096
+      );
+      assertTrue(TellusCanopyHeightSource.levelForResolution(1.0, adjusted) < 13);
+      assertTrue(TellusCanopyHeightSource.areaTileCount(-extent, -extent, extent, extent, 1.0, adjusted) <= 4096);
+   }
+
+   @Test
+   void veryFineRequestedResolutionCanStillReachCoarseOverview() {
+      int extent = 1_000_000;
+      double adjusted = TellusCanopyHeightSource.resolutionForAreaTileBudget(
+         -extent, -extent, extent, extent, 1.0, 1.0E-12, 32
+      );
+      assertTrue(TellusCanopyHeightSource.areaTileCount(-extent, -extent, extent, extent, 1.0, adjusted) <= 32);
+   }
+
+   @Test
    void coarsensLargePreviewAreasToTheirTileBudget() {
       double requestedResolution = 60.0;
       int initialTiles = TellusCanopyHeightSource.areaTileCount(-512, -512, 512, 512, 30.0, requestedResolution);
