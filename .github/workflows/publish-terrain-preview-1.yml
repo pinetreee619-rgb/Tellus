@@ -1,0 +1,55 @@
+name: Publish terrain preview 1
+
+on:
+  push:
+    branches: [release/terrain-preview-1]
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    if: github.repository == 'pinetreee619-rgb/Tellus'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      SOURCE_SHA: f0f3a099da33c7e537cc82bafac1b79a4a23cbd7
+      BUILD_RUN: '45440313836'
+      RELEASE_TAG: v0.8.4-terrain-preview.1
+    steps:
+      - name: Publish verified build as prerelease
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gh run view "$BUILD_RUN" --json conclusion --jq .conclusion)" = success
+          test "$(gh run view "$BUILD_RUN" --json headSha --jq .headSha)" = "$SOURCE_SHA"
+          mkdir -p "$RUNNER_TEMP/release-jars"
+          gh run download "$BUILD_RUN" --name "tellus-jars-$SOURCE_SHA" --dir "$RUNNER_TEMP/release-jars"
+          shopt -s nullglob
+          jars=("$RUNNER_TEMP"/release-jars/Tellus-*.jar)
+          if (( ${#jars[@]} != 2 )); then
+            echo "::error::Expected exactly two verified Fabric JARs."
+            exit 1
+          fi
+          for jar in "${jars[@]}"; do
+            unzip -tq "$jar"
+          done
+          cat > "$RUNNER_TEMP/release-notes.md" <<'NOTES'
+          Experimental fork of Tellus 0.8.4, for Minecraft 26.2 and 26.3 Fabric.
+          
+          - Refined synthetic lake basins, river shoals and bank terraces.
+          - Rocky coastal cliffs and curvature-sensitive alpine scree.
+          - Includes the preceding verified fixes to elevation repair, rivers, coastlines, canopy sampling, caching, Voxy and Distant Horizons integration.
+          - Original Minecraft tree geometry and original cold-biome rules preserved. Nature's Spirit integration is not included.
+          - No hydraulic erosion or added sub-resolution height noise.
+          
+          Both targets passed automated builds and tests. In-game visual quality, performance and runtime mod compatibility have not been verified. Back up existing worlds before use. Install only the JAR matching your Minecraft version. No external mod JARs are bundled.
+          
+          Source: https://github.com/pinetreee619-rgb/Tellus/tree/f0f3a099da33c7e537cc82bafac1b79a4a23cbd7
+          Build: https://github.com/pinetreee619-rgb/Tellus/actions/runs/45440313836
+          License: GNU LGPL-3.0 (see the source repository).
+          NOTES
+          gh release create "$RELEASE_TAG" "${jars[@]}" --target "$SOURCE_SHA" --prerelease --title "Tellus 0.8.4 — Terrain Preview 1" --notes-file "$RUNNER_TEMP/release-notes.md"
