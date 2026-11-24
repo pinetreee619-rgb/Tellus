@@ -4,6 +4,8 @@ import com.mojang.datafixers.util.Pair;
 import com.mojang.serialization.MapCodec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 import com.yucareux.tellus.compat.MinecraftVersionCompat;
+import com.yucareux.tellus.platform.TellusPlatform;
+import com.yucareux.tellus.world.data.resolve.TellusResolveSource;
 import com.yucareux.tellus.world.data.biome.BiomeClassification;
 import com.yucareux.tellus.world.data.biome.BiomeClassificationProviders;
 import com.yucareux.tellus.world.data.cover.TellusLandCoverSource;
@@ -141,6 +143,7 @@ public final class EarthBiomeSource extends TellusBiomeSourceBridge {
    private final WaterSurfaceResolver waterResolver;
    private final AntarcticSnowPolicy antarcticSnowPolicy;
    private final RandomBiomeMixer randomBiomeMixer;
+   private final NaturesSpiritBiomeBridge naturesSpirit;
    private final ThreadLocal<Integer> structureBiomeQueryDepth = new ThreadLocal<>();
    private final BadlandsRegionField badlandsRegion;
    private final ThreadLocal<EarthBiomeSource.SnowBiomeCache> snowBiomeCache = ThreadLocal.withInitial(
@@ -183,6 +186,7 @@ public final class EarthBiomeSource extends TellusBiomeSourceBridge {
       this.antarcticSnowPolicy = AntarcticSnowPolicy.forWorldScale(this.settings.worldScale());
       this.badlandsRegion = new BadlandsRegionField(this.settings.worldScale());
       this.randomBiomeMixer = new RandomBiomeMixer(this.biomeLookup, this.settings);
+      this.naturesSpirit = NaturesSpiritBiomeBridge.create(this.biomeLookup, TellusPlatform.isModLoaded("natures_spirit"));
       this.possibleBiomes = this.buildPossibleBiomes();
    }
 
@@ -607,6 +611,10 @@ public final class EarthBiomeSource extends TellusBiomeSourceBridge {
 
       Holder<Biome> biome = biomeKey == null ? this.plains : this.resolveBiome(biomeKey, this.plains);
       biome = this.applyRareBiomeVariants(biome, blockX, blockZ, visualCoverClass, koppen);
+      if (this.naturesSpirit.enabled() && !Biomes.BADLANDS.equals(biomeKey)) {
+         biome = this.naturesSpirit.select(biome, visualCoverClass, koppen,
+            TellusResolveSource.shared().sampleEcoregion(blockX, blockZ, this.settings.worldScale()));
+      }
       return this.applyRandomLandBiome(biome, blockX, blockZ, koppen);
    }
 
@@ -847,6 +855,7 @@ public final class EarthBiomeSource extends TellusBiomeSourceBridge {
          holders.add(this.resolveBiome(key, this.plains));
       }
 
+      holders.addAll(this.naturesSpirit.possibleBiomes());
       holders.add(this.plains);
       holders.add(this.sunflowerPlains);
       holders.add(this.flowerForest);
