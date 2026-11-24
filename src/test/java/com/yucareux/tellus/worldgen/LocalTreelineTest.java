@@ -109,6 +109,36 @@ class LocalTreelineTest {
       assertEquals(curve, same);
    }
 
+   @Test
+   void localTreelineUsesClimateAcrossTheAntimeridian() {
+      // A cold/warm border lies exactly on the date line, rather than inside a tile.
+      LocalTreeline.ClimateRaster seam = new LocalTreeline.ClimateRaster() {
+         @Override
+         public TellusKoppenSource.PixelGrid grid() {
+            return GRID;
+         }
+
+         @Override
+         public int classIndex(int pixelX, int pixelY) {
+            if (pixelX < 0 || pixelX >= GRID.width() || pixelY < 0 || pixelY >= GRID.height()) {
+               return 0;
+            }
+            return pixelX >= GRID.width() / 2 ? TellusKoppenSource.CLASS_ET : DFB;
+         }
+      };
+      LocalTreeline treeline = new LocalTreeline(seam, (latitude, longitude) -> {
+         assertTrue(longitude >= -180.0 && longitude < 180.0, "noncanonical longitude " + longitude);
+         return 3000.0;
+      });
+      double curve = MountainElevationZones.treelineMeters(PEAK_LATITUDE);
+      double west = treeline.treelineMeters(PEAK_LATITUDE, 179.99);
+      double east = treeline.treelineMeters(PEAK_LATITUDE, -179.99);
+      assertTrue(west > curve + 300.0, "west " + west);
+      assertTrue(east > curve + 300.0, "east " + east);
+      assertEquals(west, east, 40.0);
+      assertEquals(east, treeline.treelineMeters(PEAK_LATITUDE, 180.01), 1.0E-6);
+   }
+
    private static LocalTreeline.ClimateRaster raster(double tundraMeters) {
       return new LocalTreeline.ClimateRaster() {
          @Override

@@ -168,7 +168,7 @@ public final class LocalTreeline {
       }
 
       byte[] classes = new byte[width * height];
-      this.climate.readWindow(pixelWest, pixelNorth, width, height, classes);
+      this.readClimateWindow(grid, pixelWest, pixelNorth, width, height, classes);
       boolean anyCold = false;
       for (byte value : classes) {
          if (isCold(Byte.toUnsignedInt(value))) {
@@ -252,6 +252,35 @@ public final class LocalTreeline {
       return new LocalTreeline.Tile(nodes, degraded, System.nanoTime());
    }
 
+   /** Only a full-world raster can safely wrap across its longitudinal edges. */
+   private static boolean wrapsLongitude(TellusKoppenSource.PixelGrid grid) {
+      return grid.width() > 0 && grid.pixelWidthDegrees() > 0.0
+         && Math.abs(grid.width() * grid.pixelWidthDegrees() - 360.0) < 0.5 * grid.pixelWidthDegrees();
+   }
+
+   private void readClimateWindow(
+      TellusKoppenSource.PixelGrid grid, int pixelX, int pixelY, int width, int height, byte[] out
+   ) {
+      if (!wrapsLongitude(grid) || (pixelX >= 0 && (long)pixelX + width <= grid.width())) {
+         this.climate.readWindow(pixelX, pixelY, width, height, out);
+         return;
+      }
+
+      // Preserve unwrapped coordinates for the local Gaussian window, but read each
+      // segment from its canonical raster columns. Latitude remains nonperiodic.
+      int offset = 0;
+      while (offset < width) {
+         int wrappedX = Math.floorMod(pixelX + offset, grid.width());
+         int segmentWidth = Math.min(width - offset, grid.width() - wrappedX);
+         byte[] segment = new byte[segmentWidth * height];
+         this.climate.readWindow(wrappedX, pixelY, segmentWidth, height, segment);
+         for (int y = 0; y < height; y++) {
+            System.arraycopy(segment, y * segmentWidth, out, y * width + offset, segmentWidth);
+         }
+         offset += segmentWidth;
+      }
+   }
+
    private double pixelElevation(
       float[] elevations, TellusKoppenSource.PixelGrid grid, int width, int pixelWest, int pixelNorth, int x, int y
    ) {
@@ -271,6 +300,9 @@ public final class LocalTreeline {
     * are not kept, so missing data is read again once it arrives.
     */
    private float sharedPixelElevation(TellusKoppenSource.PixelGrid grid, int pixelX, int pixelY) {
+      if (wrapsLongitude(grid)) {
+         pixelX = Math.floorMod(pixelX, grid.width());
+      }
       long key = (long)(pixelY >> ELEVATION_BLOCK_SHIFT) << 32 | (long)(pixelX >> ELEVATION_BLOCK_SHIFT) & 0xFFFFFFFFL;
       float[] block = this.elevationBlocks.getIfPresent(key);
       if (block == null) {
