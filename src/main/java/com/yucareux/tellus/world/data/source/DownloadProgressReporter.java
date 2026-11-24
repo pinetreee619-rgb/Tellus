@@ -1,6 +1,5 @@
 package com.yucareux.tellus.world.data.source;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.Objects;
@@ -70,21 +69,7 @@ public final class DownloadProgressReporter {
       if (maxBytes <= 0) {
          throw new IllegalArgumentException("Download byte limit must be positive");
       }
-      ByteArrayOutputStream output = new ByteArrayOutputStream(8192);
-      byte[] buffer = new byte[8192];
-
-      int read;
-      while ((read = input.read(buffer)) >= 0) {
-         if (read != 0) {
-            if (output.size() > maxBytes - read) {
-               throw new IOException("Download exceeds the " + maxBytes + " byte safety limit");
-            }
-            output.write(buffer, 0, read);
-            bytesRead(read);
-         }
-      }
-
-      return output.toByteArray();
+      return InputStreamSafety.readAllBytes(input, maxBytes, "Download", DownloadProgressReporter::bytesRead);
    }
 
    public interface Listener {
