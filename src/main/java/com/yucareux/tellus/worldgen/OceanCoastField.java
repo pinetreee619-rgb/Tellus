@@ -43,10 +43,10 @@ public final class OceanCoastField {
    private static final int CACHE_TILES = intProperty("tellus.oceanCoastCacheTiles", 192, 4, 512);
    private static final int COARSE_CACHE_TILES = intProperty("tellus.oceanCoastCoarseCacheTiles", 1024, 16, 16384);
    private static final int RECENT_TILES = 32;
-   // A block-field build at 1:1 pads its 512-block core with the 513-block transition: about 65 MB of scratch.
-   // Few tiles are built at once (each serves a 512-block square), so a sixteenth of the heap is plenty.
+   // At the default 1:1 transition, the 512-block core and correction halo need about 90 MiB of scratch.
+   // Keep the concurrency estimate in step with the larger dependency margin.
    private static final ScratchPool<Scratch> SCRATCH = new ScratchPool<>(
-      Scratch::new, ScratchPool.concurrency("tellus.oceanCoastBuildConcurrency", 65, 16), 2
+      Scratch::new, ScratchPool.concurrency("tellus.oceanCoastBuildConcurrency", 90, 16), 2
    );
 
    private final TellusOsmWaterSource waterSource;
@@ -211,7 +211,7 @@ public final class OceanCoastField {
 
    private MacroTile build(int macroX, int macroZ) {
       // Grid coordinates below are cells; with a cell size of 1 they are blocks.
-      int halo = ceilDiv(this.transitionBlocks, this.cellSize) + 1;
+      int halo = correctionHaloCells(this.transitionBlocks, this.cellSize, this.worldScale);
       int size = this.coreSize + halo * 2;
       int area = Math.multiplyExact(size, size);
       int minX = macroX * this.coreSize - halo;
@@ -434,7 +434,9 @@ public final class OceanCoastField {
                continue;
             }
             int candidate = current + COST[n];
-            if (candidate <= maxCost && candidate < distance[neighbor]) {
+            if (candidate <= maxCost && (candidate < distance[neighbor]
+               || candidate == distance[neighbor] && nearestSeed != null
+                  && prefersCoastSeed(nearestSeed[index], nearestSeed[neighbor]))) {
                distance[neighbor] = candidate;
                if (nearestSeed != null) {
                   nearestSeed[neighbor] = nearestSeed[index];
@@ -497,6 +499,28 @@ public final class OceanCoastField {
          );
       }
       return filled[0];
+   }
+
+   /**
+    * A core cell depends on its nearest coast (transition), that coast's nearby
+    * corrected seeds (dilation), and the depth samples that assign corrections
+    * to those seeds (trigger). Those samples must themselves see every competing
+    * seed within trigger range. One extra cell lets us classify the outer coast.
+    */
+   static int correctionHaloCells(int transitionBlocks, int cellSize, double worldScale) {
+      int transition = ceilDiv(transitionBlocks, cellSize);
+      int trigger = Math.min(transition, ceilDiv(
+         OceanFloorProfile.scaleBlockDistance(OceanFloorProfile.TRIGGER_SCAN_BLOCKS, worldScale), cellSize
+      ));
+      int dilation = ceilDiv(
+         OceanFloorProfile.scaleBlockDistance(OceanFloorProfile.CORRECTION_DILATION_BLOCKS, worldScale), cellSize
+      );
+      return transition + 2 * trigger + dilation + 1;
+   }
+
+   // Row-major seed indices preserve world (z, x) ordering across translated tile windows.
+   static boolean prefersCoastSeed(int candidate, int previous) {
+      return candidate >= 0 && (previous < 0 || candidate < previous);
    }
 
    private static int ceilDiv(int value, int divisor) {
