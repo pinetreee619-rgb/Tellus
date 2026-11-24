@@ -195,6 +195,45 @@ class TreeLeafDecayTest {
    }
 
    @Test
+   void leaningTrunkHasFaceConnectedCoreAtEachHorizontalStep() {
+      TestWorld world = new TestWorld();
+      BlockPos ground = new BlockPos(0, 64, 0);
+      var plan = leaningTrunkPlan();
+      assertTrue(TellusProceduralTreeGenerator.place(world.level, ground, plan, 17L));
+      int lastX = 0, lastZ = 0;
+      for (int y = 1; y <= 18; y++) {
+         int x = (int)Math.round(plan.leanX() * (y / (double)plan.height()));
+         int z = (int)Math.round(plan.leanZ() * (y / (double)plan.height()));
+         assertTrue(world.state(ground.offset(x, y, z)).is(Blocks.BIRCH_LOG), "missing trunk core at " + y);
+         if (y > 1 && (x != lastX || z != lastZ)) {
+            assertTrue(world.state(ground.offset(lastX, y, lastZ)).is(Blocks.BIRCH_LOG), "missing vertical bridge at " + y);
+            if (x != lastX && z != lastZ) {
+               assertTrue(world.state(ground.offset(x, y, lastZ)).is(Blocks.BIRCH_LOG), "missing horizontal bridge at " + y);
+            }
+         }
+         lastX = x;
+         lastZ = z;
+      }
+   }
+
+   @Test
+   void obstructedLowerTrunkBridgePreventsPartialTreePlacement() {
+      TestWorld world = new TestWorld();
+      BlockPos ground = new BlockPos(0, 64, 0);
+      BlockPos obstruction = ground.above(2);
+      world.blocks.put(obstruction, Blocks.STONE.defaultBlockState());
+      assertFalse(TellusProceduralTreeGenerator.place(world.level, ground, leaningTrunkPlan(), 17L));
+      assertEquals(1, world.blocks.size());
+      assertTrue(world.state(obstruction).is(Blocks.STONE));
+   }
+
+   private static TellusProceduralTreeGenerator.TreePlan leaningTrunkPlan() {
+      return new TellusProceduralTreeGenerator.TreePlan(
+         TellusProceduralTreeGenerator.Profile.BIRCH, 20, 1, 4, 9, 12, 6, -6, false, true
+      );
+   }
+
+   @Test
    void everyTreeProfileSmallTreeAndBushProducesStableDecayableLeaves() throws Exception {
       for (TellusProceduralTreeGenerator.Profile profile : TellusProceduralTreeGenerator.Profile.values()) {
          for (long seed : new long[]{0L, 17L, 912341L}) {

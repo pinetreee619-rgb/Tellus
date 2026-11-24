@@ -331,20 +331,30 @@ public final class TellusProceduralTreeGenerator {
    private static boolean hasTrunkClearance(WorldGenLevel level, BlockPos ground, TreePlan plan) {
       BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
       int clearanceHeight = Math.max(3, Math.min(plan.height(), plan.crownBase() + 3));
+      int previousX = ground.getX(), previousZ = ground.getZ();
       for (int y = 1; y <= clearanceHeight; y++) {
          double progress = y / (double)Math.max(1, plan.height());
          int x = ground.getX() + (int)Math.round(plan.leanX() * progress);
          int z = ground.getZ() + (int)Math.round(plan.leanZ() * progress);
-         cursor.set(x, ground.getY() + y, z);
-         if (!level.ensureCanWrite(cursor)) {
+         int worldY = ground.getY() + y;
+         if (y > 1 && (x != previousX || z != previousZ)) {
+            if (!clearTrunkCell(level, cursor.set(previousX, worldY, previousZ))
+               || !clearTrunkCell(level, cursor.set(x, worldY, previousZ))) {
+               return false;
+            }
+         }
+         if (!clearTrunkCell(level, cursor.set(x, worldY, z))) {
             return false;
          }
-         BlockState current = level.getBlockState(cursor);
-         if (!canReplaceTrunk(current)) {
-            return false;
-         }
+         previousX = x;
+         previousZ = z;
       }
       return true;
+   }
+
+   private static boolean clearTrunkCell(WorldGenLevel level, BlockPos position) {
+      return MinecraftVersionCompat.isInsideBuildHeight(level, position)
+         && level.ensureCanWrite(position) && canReplaceTrunk(level.getBlockState(position));
    }
 
    private static void growTrunk(TreePlacement tree, BlockPos ground, TreePlan plan, BlockState log) {
@@ -358,6 +368,8 @@ public final class TellusProceduralTreeGenerator {
       } else {
          trunkTop = Math.max(plan.crownBase() + 2, (int)Math.round(plan.height() * 0.88));
       }
+      int previousX = ground.getX(), previousZ = ground.getZ();
+      BlockPos.MutableBlockPos bridge = new BlockPos.MutableBlockPos();
       for (int y = 1; y <= trunkTop; y++) {
          double progress = y / (double)Math.max(1, plan.height());
          int centerX = ground.getX() + (int)Math.round(plan.leanX() * progress);
@@ -368,7 +380,18 @@ public final class TellusProceduralTreeGenerator {
             && (y == 1 || y == 2 && plan.trunkRadius() >= 3)) {
             radius++;
          }
-         placeLogDisc(tree, centerX, ground.getY() + y, centerZ, radius, axis(log, Direction.Axis.Y));
+         int worldY = ground.getY() + y;
+         // Leaning one-block cores used to touch only along edges or corners.
+         // Connect successive layers vertically, then along X and Z.
+         if (y > 1 && (centerX != previousX || centerZ != previousZ)) {
+            tree.setLog(bridge.set(previousX, worldY, previousZ), axis(log, Direction.Axis.Y));
+            if (centerX != previousX && centerZ != previousZ) {
+               tree.setLog(bridge.set(centerX, worldY, previousZ), axis(log, Direction.Axis.X));
+            }
+         }
+         placeLogDisc(tree, centerX, worldY, centerZ, radius, axis(log, Direction.Axis.Y));
+         previousX = centerX;
+         previousZ = centerZ;
       }
    }
 
