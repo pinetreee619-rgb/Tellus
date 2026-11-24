@@ -43,8 +43,8 @@ public final class OceanCoastField {
    private static final int CACHE_TILES = intProperty("tellus.oceanCoastCacheTiles", 192, 4, 512);
    private static final int COARSE_CACHE_TILES = intProperty("tellus.oceanCoastCoarseCacheTiles", 1024, 16, 16384);
    private static final int RECENT_TILES = 32;
-   // At the default 1:1 transition, the 512-block core and correction halo need about 90 MiB of scratch.
-   // Keep the concurrency estimate in step with the larger dependency margin.
+   // The default 1:1 grid now uses roughly 74 MiB of array payload after buffer reuse.
+   // Retain a conservative 90 MiB concurrency estimate for allocations outside those arrays.
    private static final ScratchPool<Scratch> SCRATCH = new ScratchPool<>(
       Scratch::new, ScratchPool.concurrency("tellus.oceanCoastBuildConcurrency", 90, 16), 2
    );
@@ -293,14 +293,15 @@ public final class OceanCoastField {
       propagate(ocean, true, size, maxCost, distance, nearestSeed, scratch.heap);
       boolean[] correctedSeed = scratch.correctedSeed;
       boolean[] validDepth = scratch.validDepth;
-      int[] rawDepth = scratch.rawDepth;
+      int[] rawDepth = scratch.depthOrDilation;
       Arrays.fill(correctedSeed, 0, area, false);
-      Arrays.fill(validDepth, 0, area, false);
-      Arrays.fill(rawDepth, 0, area, 0);
+      boolean anyCorrectedSeed = false;
       int triggerBlocks = OceanFloorProfile.scaleBlockDistance(OceanFloorProfile.TRIGGER_SCAN_BLOCKS, this.worldScale);
       int triggerCost = Math.min(maxCost, ceilDiv(triggerBlocks, this.cellSize) * CARDINAL_COST);
 
       if (this.rawDepthSampler != null && triggerCost >= 0) {
+         Arrays.fill(validDepth, 0, area, false);
+         Arrays.fill(rawDepth, 0, area, 0);
          for (int z = 1; z < size - 1; z++) {
             int row = z * size;
             for (int x = 1; x < size - 1; x++) {
@@ -339,13 +340,18 @@ public final class OceanCoastField {
                   int seed = nearestSeed[index];
                   if (seed >= 0) {
                      correctedSeed[seed] = true;
+                     anyCorrectedSeed = true;
                   }
                }
             }
          }
       }
 
-      this.dilateCorrectedSeeds(correctedSeed, distance, nearestSeed, size, area, scratch);
+      // Raw depths are no longer needed after every correction seed has been marked.
+      // Reuse that buffer for dilation, and skip the pass for naturally smooth coasts.
+      if (anyCorrectedSeed) {
+         this.dilateCorrectedSeeds(correctedSeed, distance, nearestSeed, size, area, scratch);
+      }
       long[] coreOcean = new long[bitWords(this.coreSize * this.coreSize)];
       short[] coreDistance = new short[this.coreSize * this.coreSize];
       long[] coreCorrection = new long[bitWords(this.coreSize * this.coreSize)];
@@ -381,7 +387,7 @@ public final class OceanCoastField {
       int area,
       Scratch scratch
    ) {
-      int[] dilationDistance = scratch.dilationDistance;
+      int[] dilationDistance = scratch.depthOrDilation;
       Arrays.fill(dilationDistance, 0, area, Integer.MAX_VALUE);
       scratch.heap.reset(area);
       for (int index = 0; index < area; index++) {
@@ -603,9 +609,9 @@ public final class OceanCoastField {
       private boolean[] correctedSeed = new boolean[0];
       private boolean[] validDepth = new boolean[0];
       private int[] distance = new int[0];
-      private int[] dilationDistance = new int[0];
       private int[] nearestSeed = new int[0];
-      private int[] rawDepth = new int[0];
+      // These phases never overlap; one int grid serves both.
+      private int[] depthOrDilation = new int[0];
       private final MinHeap heap = new MinHeap();
 
       private void ensureCapacity(int area) {
@@ -614,9 +620,8 @@ public final class OceanCoastField {
             this.correctedSeed = new boolean[area];
             this.validDepth = new boolean[area];
             this.distance = new int[area];
-            this.dilationDistance = new int[area];
             this.nearestSeed = new int[area];
-            this.rawDepth = new int[area];
+            this.depthOrDilation = new int[area];
          }
       }
    }
