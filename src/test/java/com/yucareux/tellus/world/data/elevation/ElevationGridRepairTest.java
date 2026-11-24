@@ -1,10 +1,12 @@
 package com.yucareux.tellus.world.data.elevation;
 
 import java.util.Arrays;
+import java.util.Random;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -73,5 +75,70 @@ class ElevationGridRepairTest {
    void rejectsDimensionsThatOverflowAnIntProduct() {
       assertThrows(IllegalArgumentException.class, () ->
          ElevationGridRepair.repairMissing(new double[0], new boolean[0], 65536, 65536));
+   }
+
+   @Test
+   void matchesOriginalCardinalInterpolationOnRectangularGrids() {
+      Random random = new Random(732L);
+      int width = 23;
+      int height = 11;
+      int[] dx = {-1, 1, 0, 0};
+      int[] dz = {0, 0, -1, 1};
+      for (int trial = 0; trial < 100; trial++) {
+         double[] samples = new double[width * height];
+         boolean[] missing = new boolean[samples.length];
+         for (int i = 0; i < samples.length; i++) {
+            samples[i] = random.nextDouble() * 8000.0 - 1000.0;
+            // Ensure at least one original sample in each row, so cardinal repair is enough.
+            missing[i] = i % width != 0 && random.nextBoolean();
+         }
+         double[] expected = samples.clone();
+         for (int z = 0; z < height; z++) {
+            for (int x = 0; x < width; x++) {
+               int index = x + z * width;
+               if (!missing[index]) {
+                  continue;
+               }
+               double weighted = 0.0;
+               double totalWeight = 0.0;
+               for (int direction = 0; direction < 4; direction++) {
+                  for (int distance = 1; ; distance++) {
+                     int nx = x + dx[direction] * distance;
+                     int nz = z + dz[direction] * distance;
+                     if (nx < 0 || nx >= width || nz < 0 || nz >= height) {
+                        break;
+                     }
+                     int candidate = nx + nz * width;
+                     if (!missing[candidate]) {
+                        double weight = 1.0 / distance;
+                        weighted += samples[candidate] * weight;
+                        totalWeight += weight;
+                        break;
+                     }
+                  }
+               }
+               expected[index] = weighted / totalWeight;
+            }
+         }
+         assertTrue(ElevationGridRepair.repairMissing(samples, missing, width, height));
+         assertArrayEquals(expected, samples, 0.0);
+         assertArrayEquals(new boolean[samples.length], missing);
+      }
+   }
+
+   @Test
+   void interpolatesWideMissingStrip() {
+      int width = 4097;
+      double[] elevations = new double[width];
+      boolean[] missing = new boolean[width];
+      Arrays.fill(missing, true);
+      elevations[0] = -100.0;
+      elevations[width - 1] = 300.0;
+      missing[0] = false;
+      missing[width - 1] = false;
+      assertTrue(ElevationGridRepair.repairMissing(elevations, missing, width, 1));
+      for (int x = 0; x < width; x++) {
+         assertEquals(-100.0 + 400.0 * x / (width - 1), elevations[x], 1.0E-9);
+      }
    }
 }

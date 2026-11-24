@@ -34,60 +34,43 @@ public final class ElevationGridRepair {
       }
 
       boolean[] unresolved = Arrays.copyOf(missing, size);
+      double[] weights = new double[size];
+      // Store sums only in missing cells, leaving the original valid samples untouched.
+      for (int index = 0; index < size; index++) {
+         if (missing[index]) {
+            elevations[index] = 0.0;
+         }
+      }
+      // Each pass finds the nearest original sample in one cardinal direction.
+      // Keeping left, right, up, down order preserves the original weighted arithmetic.
       for (int z = 0; z < height; z++) {
-         for (int x = 0; x < width; x++) {
-            int index = x + z * width;
-            if (!unresolved[index]) {
-               continue;
-            }
-
-            double weightedElevation = 0.0;
-            double totalWeight = 0.0;
-            for (int left = x - 1; left >= 0; left--) {
-               int candidate = left + z * width;
-               if (!missing[candidate]) {
-                  double weight = 1.0 / (x - left);
-                  weightedElevation += elevations[candidate] * weight;
-                  totalWeight += weight;
-                  break;
-               }
-            }
-            for (int right = x + 1; right < width; right++) {
-               int candidate = right + z * width;
-               if (!missing[candidate]) {
-                  double weight = 1.0 / (right - x);
-                  weightedElevation += elevations[candidate] * weight;
-                  totalWeight += weight;
-                  break;
-               }
-            }
-            for (int up = z - 1; up >= 0; up--) {
-               int candidate = x + up * width;
-               if (!missing[candidate]) {
-                  double weight = 1.0 / (z - up);
-                  weightedElevation += elevations[candidate] * weight;
-                  totalWeight += weight;
-                  break;
-               }
-            }
-            for (int down = z + 1; down < height; down++) {
-               int candidate = x + down * width;
-               if (!missing[candidate]) {
-                  double weight = 1.0 / (down - z);
-                  weightedElevation += elevations[candidate] * weight;
-                  totalWeight += weight;
-                  break;
-               }
-            }
-            if (totalWeight > 0.0) {
-               elevations[index] = weightedElevation / totalWeight;
+         int row = z * width;
+         accumulateLine(elevations, missing, weights, row, 1, width);
+         accumulateLine(elevations, missing, weights, row + width - 1, -1, width);
+      }
+      for (int x = 0; x < width; x++) {
+         accumulateLine(elevations, missing, weights, x, width, height);
+         accumulateLine(elevations, missing, weights, x + (height - 1) * width, -width, height);
+      }
+      boolean needsFallback = false;
+      for (int index = 0; index < size; index++) {
+         if (missing[index]) {
+            if (weights[index] > 0.0) {
+               elevations[index] /= weights[index];
                unresolved[index] = false;
+            } else {
+               needsFallback = true;
             }
          }
       }
+      if (!needsFallback) {
+         Arrays.fill(missing, false);
+         return true;
+      }
 
       // Handles unusual diagonal-only coverage without introducing a zero-height patch.
-      double[] next = new double[size];
+      // Reuse the weights array as scratch storage for the simultaneous repair passes.
+      double[] next = weights;
       while (true) {
          // Only cells actually reached in this pass may become resolved. A missing cell
          // can still contain a finite placeholder, which must never be treated as a sample.
@@ -142,5 +125,22 @@ public final class ElevationGridRepair {
          missing[index] = false;
       }
       return true;
+   }
+
+   private static void accumulateLine(
+      double[] elevations, boolean[] missing, double[] weights, int start, int stride, int length
+   ) {
+      int lastValid = -1;
+      double lastElevation = 0.0;
+      for (int position = 0, index = start; position < length; position++, index += stride) {
+         if (!missing[index]) {
+            lastValid = position;
+            lastElevation = elevations[index];
+         } else if (lastValid >= 0) {
+            double weight = 1.0 / (position - lastValid);
+            elevations[index] += lastElevation * weight;
+            weights[index] += weight;
+         }
+      }
    }
 }
