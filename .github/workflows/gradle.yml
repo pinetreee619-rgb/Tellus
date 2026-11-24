@@ -37,6 +37,32 @@ jobs:
       - name: Build and test every target
         run: ./gradlew build --stacktrace
 
+      - name: Collect installable Tellus JARs
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/tellus-jars"
+          shopt -s nullglob
+          for jar in mc*/build/libs/Tellus-*.jar; do
+            case "$jar" in
+              *-sources.jar|*-unshaded.jar|*-dev-shadow.jar) continue ;;
+            esac
+            cp -- "$jar" "$RUNNER_TEMP/tellus-jars/"
+          done
+          jars=("$RUNNER_TEMP"/tellus-jars/*.jar)
+          if (( ${#jars[@]} == 0 )); then
+            echo "::error::No installable Tellus JARs were produced."
+            exit 1
+          fi
+
+      - name: Upload installable Tellus JARs
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: tellus-jars-${{ github.sha }}
+          path: ${{ runner.temp }}/tellus-jars/*.jar
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+
       - name: Publish the dev build
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
