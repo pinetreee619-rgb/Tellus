@@ -14,8 +14,12 @@ final class InlandWaterProfile {
       double bars = noise(worldX, worldZ, 23, 0x912F6DABL);
       double slope = (0.85 + 0.35 * broad + 0.2 * bars) / Math.max(1, depthStep);
       double depth = 1.0 + Math.max(0.0, shoreDistance - 0.5) * slope;
-      // Broad pools and bars change the submerged channel without moving water
-      // outside the mapped footprint. Opposite banks sample different fields.
+      // Longitudinal shoals and pools, fading in away from the water's edge.
+      // A bounded perturbation keeps the narrowest mapped channels navigable.
+      double interior = smooth(Math.max(0.0, Math.min(1.0, (shoreDistance - 1.0) / 8.0)));
+      double shoal = noise(worldX, worldZ, 41, 0x2F81B6D4L);
+      depth += interior * (0.9 * broad + 0.65 * shoal);
+      // The footprint and water level are unchanged.
       return Math.max(1, Math.min(maximumDepth, (int)Math.round(depth)));
    }
 
@@ -31,7 +35,16 @@ final class InlandWaterProfile {
       double progress = Math.min(1.0, distance / effectiveRadius);
       double recovery = smooth(progress);
       double bankSlope = (limitSlope ? 0.42 : 0.65) + 0.22 * broad + 0.14 * local;
-      double toe = water + 0.35 + Math.max(0.0, distance - 1.0) * bankSlope;
+      double run = Math.max(0.0, distance - 1.0);
+      // Low benches and irregular bank risers, with a monotonic cross-section
+      // and a smooth return to the measured ground at the blend boundary.
+      double benchWidth = 2.5 + 1.25 * broad;
+      double bench = run / benchWidth;
+      double whole = Math.floor(bench);
+      double fraction = bench - whole;
+      double terracedRun = benchWidth * (whole + smooth(fraction));
+      double terraceWeight = 0.35 * (0.5 + 0.5 * local);
+      double toe = water + 0.35 + mix(run, terracedRun, terraceWeight) * bankSlope;
       // Recover the original terrain with zero derivative at the outer edge.
       // A hard slope cap at that edge used to leave a vertical ring of terrain.
       double shaped = Math.min(base, toe) + (base - Math.min(base, toe)) * recovery;

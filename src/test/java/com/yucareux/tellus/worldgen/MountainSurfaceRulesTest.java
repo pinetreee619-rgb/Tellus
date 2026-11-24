@@ -234,6 +234,29 @@ class MountainSurfaceRulesTest {
       assertTrue(MountainSurfaceRules.alpineMeadowScreePercent(2) < 50);
    }
 
+   @Test
+   void coastalCliffsKeepRockAndProtectedCoverKeepsItsPalette() {
+      var ocean = MountainSurfaceRules.ShorelineKind.OCEAN;
+      assertEquals(MountainSurfaceRules.ShorelineMaterial.ROCK,
+         MountainSurfaceRules.classifyShorelineMaterial(60, (byte)3, 20, 6, 0, ocean, 2, false));
+      assertEquals(MountainSurfaceRules.ShorelineMaterial.GRAVEL,
+         MountainSurfaceRules.classifyShorelineMaterial(60, (byte)3, 20, 3, 0, ocean, 2, false));
+      assertEquals(MountainSurfaceRules.ShorelineMaterial.SAND,
+         MountainSurfaceRules.classifyShorelineMaterial(60, (byte)3, 20, 1, 0, ocean, 2, false));
+      assertEquals(MountainSurfaceRules.ShorelineMaterial.PRESERVE_WETLAND,
+         MountainSurfaceRules.classifyShorelineMaterial(90, (byte)3, 20, 6, 0, ocean, 2, false));
+      assertEquals(MountainSurfaceRules.ShorelineMaterial.NONE,
+         MountainSurfaceRules.classifyShorelineMaterial(50, (byte)3, 20, 6, 0, ocean, 2, false));
+   }
+
+   @Test
+   void meadowScreeFavorsConcaveSlopesWithoutReplacingFlatTurf() {
+      assertEquals(0, MountainSurfaceRules.alpineMeadowScreePercent(1, 3));
+      assertTrue(MountainSurfaceRules.alpineMeadowScreePercent(2, 3)
+         > MountainSurfaceRules.alpineMeadowScreePercent(2, -3));
+      assertTrue(MountainSurfaceRules.alpineMeadowScreePercent(2, 99) < 50);
+   }
+
    private static int[] materialCounts(MountainSurfaceRules.MountainForm form) {
       int[] counts = new int[8];
       for (int z = 0; z < 128; z++) {

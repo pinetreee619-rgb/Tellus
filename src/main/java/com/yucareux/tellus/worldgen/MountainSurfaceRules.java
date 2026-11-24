@@ -73,6 +73,11 @@ public final class MountainSurfaceRules {
          boolean woodedCover = surfaceCoverClass == ESA_TREE_COVER || surfaceCoverClass == ESA_MOSS_LICHEN;
          boolean steepShore = slopeDiff >= (ocean ? 3 : 2) || convexity <= -2;
          boolean elevatedColdShore = heightAboveSea >= SURFACE_HIGHLAND_HEIGHT_ABOVE_SEA && (slopeDiff >= 2 || coldClimate);
+         // Exposed coastal rock faces are not continuous gravel beaches.
+         // Keep mapped wetland, ice and built cover authoritative above.
+         if (ocean && surfaceCoverClass == ESA_BARE && slopeDiff >= 6 && convexity <= 0) {
+            return MountainSurfaceRules.ShorelineMaterial.ROCK;
+         }
          if (steepShore || elevatedColdShore || coldClimate && distanceToShore <= 2) {
             return MountainSurfaceRules.ShorelineMaterial.GRAVEL;
          } else if (ocean) {
@@ -408,7 +413,13 @@ public final class MountainSurfaceRules {
 
    /** Share of a highland meadow covered by scree patches. */
    public static int alpineMeadowScreePercent(int slopeDiff) {
-      return slopeDiff >= 2 ? 25 : 0;
+      return alpineMeadowScreePercent(slopeDiff, 0);
+   }
+
+   public static int alpineMeadowScreePercent(int slopeDiff, int convexity) {
+      if (slopeDiff < 2) return 0;
+      // Debris collects in hollows rather than uniformly across the slope.
+      return Math.max(8, Math.min(45, 25 + Math.max(-3, Math.min(3, convexity)) * 6));
    }
 
    private static double approximateMask(int worldX, int worldZ, int cellSize, long salt) {
@@ -490,6 +501,7 @@ public final class MountainSurfaceRules {
       SAND,
       RED_SAND,
       GRAVEL,
+      ROCK,
       PRESERVE_WETLAND;
    }
 }

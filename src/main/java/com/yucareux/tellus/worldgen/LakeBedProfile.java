@@ -53,9 +53,17 @@ final class LakeBedProfile {
       double factor = interiorFactor(worldScale);
       double targetDepth = INTERIOR_BASE_DEPTH + primary * 2.25 + secondary * 0.75;
       targetDepth = clamp(targetDepth, INTERIOR_MIN_DEPTH, INTERIOR_MAX_DEPTH) * factor;
+      // At fine scales, add a kilometre-scale basin envelope and nested
+      // depressions. Keep the shallow shelf and the old coarse-scale profile.
+      // This is synthetic bathymetry, not a measurement of actual lake depth.
+      double detailWeight = (factor - 1.0) / 0.6;
+      double basin = valueNoise(worldX, worldZ, 512, 0x51B2C73D1F48096AL);
+      double hollow = valueNoise(worldX, worldZ, 144, 0x5AC0D0913BE7286FL);
+      targetDepth += detailWeight * (4.0 * basin + 3.0 * hollow);
+      targetDepth = clamp(targetDepth, INTERIOR_MIN_DEPTH * factor, maximumDepth(worldScale));
       double innerDepth = clamp(1.0 + (INNER_SHELF_END_BLOCKS - shelf) * slope, 1.0, 4.0);
       int depth = (int)Math.round(innerDepth + (targetDepth - innerDepth) * progress);
-      return clamp(depth, 1, (int)Math.ceil(INTERIOR_MAX_DEPTH * factor));
+      return clamp(depth, 1, maximumDepth(worldScale));
    }
 
    /**
@@ -78,6 +86,11 @@ final class LakeBedProfile {
          depth(shoreDistanceBlocks, worldX, worldZ, worldScale),
          minimumSampledDepth(spacing)
       );
+   }
+
+   static int maximumDepth(double worldScale) {
+      double factor = interiorFactor(worldScale);
+      return (int)Math.ceil(INTERIOR_MAX_DEPTH * factor + 7.0 * (factor - 1.0) / 0.6);
    }
 
    static int minimumSampledDepth(int sampleSpacingBlocks) {

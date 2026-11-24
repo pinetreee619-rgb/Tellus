@@ -55,6 +55,23 @@ class LakeBedProfileTest {
    }
 
    @Test
+   void fineScaleBasinsHaveBoundedCoherentDepthVariation() {
+      Set<Integer> depths = new HashSet<>();
+      for (int z = -512; z <= 512; z += 17) {
+         for (int x = -512; x <= 512; x += 17) {
+            int depth = LakeBedProfile.depth(100, x, z, 1.0);
+            depths.add(depth);
+            assertTrue(depth >= 12 && depth <= LakeBedProfile.maximumDepth(1.0));
+            assertTrue(Math.abs(depth - LakeBedProfile.depth(100, x + 1, z, 1.0)) <= 1);
+            assertEquals(1, LakeBedProfile.depth(0, x, z, 1.0));
+            assertEquals(depth, LakeBedProfile.depth(10_000, x, z, 1.0));
+         }
+      }
+      assertTrue(depths.size() >= 6);
+      assertEquals(14, LakeBedProfile.maximumDepth(30.0));
+   }
+
+   @Test
    void profileIsStableAcrossRepeatedAndNegativeCoordinateSamples() {
       int expected = LakeBedProfile.depth(80.0, -123_456, -654_321);
       assertEquals(expected, LakeBedProfile.depth(80.0, -123_456, -654_321));

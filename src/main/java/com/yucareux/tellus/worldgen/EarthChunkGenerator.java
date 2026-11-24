@@ -5989,6 +5989,7 @@ public final class EarthChunkGenerator extends TellusChunkGeneratorBridge {
                case NONE, PRESERVE_WETLAND -> palette;
                case SAND, RED_SAND -> palette;
                case GRAVEL -> EarthChunkGenerator.SurfacePalette.gravelly();
+               case ROCK -> EarthChunkGenerator.SurfacePalette.stonyPeaks();
             };
          }
       }
@@ -10729,6 +10730,7 @@ public final class EarthChunkGenerator extends TellusChunkGeneratorBridge {
             case NONE, PRESERVE_WETLAND -> palette;
             case SAND, RED_SAND -> palette;
             case GRAVEL -> EarthChunkGenerator.SurfacePalette.gravelly();
+               case ROCK -> EarthChunkGenerator.SurfacePalette.stonyPeaks();
          };
       }
    }
@@ -11171,7 +11173,7 @@ public final class EarthChunkGenerator extends TellusChunkGeneratorBridge {
          } else if (!isSoilPalette(palette) || coverClass == MountainSurfaceRules.ESA_TREE_COVER) {
             return palette;
          } else if (mountainSurface.form() == MountainSurfaceRules.MountainForm.ALPINE_MEADOW) {
-            return alpineMeadowSurfacePalette(worldX, worldZ, slopeDiff);
+            return alpineMeadowSurfacePalette(worldX, worldZ, slopeDiff, convexity);
          } else {
             // Steep turf keeps its land cover but breaks into rock outcrops as it steepens.
             return SurfacePatchNoise.covers(worldX, worldZ, EXPOSED_ROCK_SALT, MountainSurfaceRules.exposedRockPercent(slopeDiff))
@@ -11429,9 +11431,9 @@ public final class EarthChunkGenerator extends TellusChunkGeneratorBridge {
       }
    }
 
-   private static EarthChunkGenerator.SurfacePalette alpineMeadowSurfacePalette(int worldX, int worldZ, int slopeDiff) {
+   private static EarthChunkGenerator.SurfacePalette alpineMeadowSurfacePalette(int worldX, int worldZ, int slopeDiff, int convexity) {
       // Steeper highland turf carries scree patches rather than turning to gravel outright.
-      return SurfacePatchNoise.covers(worldX, worldZ, ALPINE_SCREE_SALT, MountainSurfaceRules.alpineMeadowScreePercent(slopeDiff))
+      return SurfacePatchNoise.covers(worldX, worldZ, ALPINE_SCREE_SALT, MountainSurfaceRules.alpineMeadowScreePercent(slopeDiff, convexity))
          ? EarthChunkGenerator.SurfacePalette.gravelly()
          : EarthChunkGenerator.SurfacePalette.alpineMeadow();
    }
