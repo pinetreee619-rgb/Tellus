@@ -42,6 +42,39 @@ jobs:
         if: github.ref != 'refs/heads/main'
         run: ./gradlew -PtellusTargets=mc262,mc263 build --stacktrace
 
+      - name: Print failed test details
+        if: failure()
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          from xml.etree import ElementTree
+
+          for report in sorted(Path(".").glob("mc*/build/test-results/**/TEST-*.xml")):
+              try:
+                  suite = ElementTree.parse(report).getroot()
+              except (OSError, ElementTree.ParseError) as error:
+                  print(f"Cannot read {report}: {error}")
+                  continue
+              for test in suite.iter("testcase"):
+                  for problem in list(test.findall("failure")) + list(test.findall("error")):
+                      print(f"FAIL [{report.parts[0]}] {test.get('classname')}.{test.get('name')}")
+                      print(f"  {problem.get('type', '')}: {problem.get('message', '')}")
+                      for line in (problem.text or "").splitlines()[:40]:
+                          print(f"  {line}")
+          PY
+
+      - name: Upload test reports
+        if: always() && !cancelled()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: tellus-test-reports-${{ github.sha }}
+          path: |
+            mc*/build/test-results/**
+            mc*/build/reports/tests/**
+          if-no-files-found: ignore
+          retention-days: 14
+
       - name: Collect installable Tellus JARs
         shell: bash
         run: |
