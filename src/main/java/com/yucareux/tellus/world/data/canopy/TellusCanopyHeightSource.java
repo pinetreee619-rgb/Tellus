@@ -11,11 +11,14 @@ import com.yucareux.tellus.cache.TellusCacheHandle;
 import com.yucareux.tellus.cache.TellusCacheRegistry;
 import com.yucareux.tellus.integration.distant_horizons.managed.ManagedTerrainNetworkPolicy;
 import com.yucareux.tellus.platform.TellusPlatform;
+import com.yucareux.tellus.world.data.source.BoundedHttpBody;
+import com.yucareux.tellus.world.data.source.InputStreamSafety;
 import com.yucareux.tellus.world.data.source.ParallelDownloadRunner;
 import com.yucareux.tellus.world.data.source.SourceInterrupts;
 import com.yucareux.tellus.worldgen.EarthProjection;
 import java.io.IOException;
 import java.io.InterruptedIOException;
+import java.io.InputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -400,7 +403,9 @@ public final class TellusCanopyHeightSource implements TellusCacheHandle {
       // An interrupt closes the file channel mid-read; a small local read finishes first instead.
       boolean interrupted = Thread.interrupted();
       try {
-         return Files.readAllBytes(path);
+         try (InputStream input = Files.newInputStream(path)) {
+            return InputStreamSafety.readAllBytes(input, MAX_RESPONSE_BYTES, "ETH canopy cache tile");
+         }
       } finally {
          if (interrupted) {
             Thread.currentThread().interrupt();
@@ -419,7 +424,8 @@ public final class TellusCanopyHeightSource implements TellusCacheHandle {
                .header("User-Agent", "Tellus-Minecraft-Mod/" + MinecraftRelease.VERSION)
                .GET()
                .build();
-            HttpResponse<byte[]> response = this.httpClient.send(request, HttpResponse.BodyHandlers.ofByteArray());
+            HttpResponse<byte[]> response = this.httpClient.send(request,
+               BoundedHttpBody.handler(MAX_RESPONSE_BYTES, "ETH canopy tile"));
             if (response.statusCode() != 200) {
                throw new IOException("HTTP " + response.statusCode() + " from ETH canopy tile service");
             }
