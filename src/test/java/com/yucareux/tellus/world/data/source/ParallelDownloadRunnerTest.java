@@ -1,6 +1,7 @@
 package com.yucareux.tellus.world.data.source;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -11,6 +12,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.Test;
 
 class ParallelDownloadRunnerTest {
@@ -192,5 +194,79 @@ class ParallelDownloadRunnerTest {
       });
       assertEquals(3, completed);
       assertEquals(2, failedCalls.get());
+   }
+
+   @Test
+   void recentDownloadsExpireAndEvictInCompletionOrder() {
+      AtomicLong clock = new AtomicLong();
+      ParallelDownloadRunner.RecentDownloads<String> cache =
+         new ParallelDownloadRunner.RecentDownloads<>(2, 10L, clock::get);
+      cache.remember("a");
+      clock.set(1L);
+      cache.remember("b");
+      clock.set(2L);
+      cache.remember("a");
+      clock.set(3L);
+      cache.remember("c");
+      assertFalse(cache.contains("b"));
+      assertTrue(cache.contains("a"));
+      assertTrue(cache.contains("c"));
+      clock.set(12L);
+      assertTrue(cache.contains("a"));
+      clock.set(13L);
+      assertFalse(cache.contains("a"));
+      assertTrue(cache.contains("c"));
+      clock.set(14L);
+      assertFalse(cache.contains("c"));
+   }
+
+   @Test
+   void disabledRecentDownloadsNeverRetainEntries() {
+      ParallelDownloadRunner.RecentDownloads<String> noCapacity =
+         new ParallelDownloadRunner.RecentDownloads<>(0, 10L, () -> 0L);
+      ParallelDownloadRunner.RecentDownloads<String> noRetention =
+         new ParallelDownloadRunner.RecentDownloads<>(10, 0L, () -> 0L);
+      noCapacity.remember("tile");
+      noRetention.remember("tile");
+      assertFalse(noCapacity.contains("tile"));
+      assertFalse(noRetention.contains("tile"));
+   }
+
+   @Test
+   void concurrentRecentDownloadsStayWithinCapacity() throws Exception {
+      int workers = 8;
+      int perWorker = 100;
+      int capacity = 32;
+      ParallelDownloadRunner.RecentDownloads<Integer> cache =
+         new ParallelDownloadRunner.RecentDownloads<>(capacity, 10L, () -> 0L);
+      ExecutorService executor = Executors.newFixedThreadPool(workers);
+      CountDownLatch start = new CountDownLatch(1);
+      java.util.ArrayList<Future<?>> tasks = new java.util.ArrayList<>();
+      try {
+         for (int worker = 0; worker < workers; worker++) {
+            int offset = worker * perWorker;
+            tasks.add(executor.submit(() -> {
+               start.await();
+               for (int i = 0; i < perWorker; i++) {
+                  cache.remember(offset + i);
+                  cache.contains(offset + i);
+               }
+               return null;
+            }));
+         }
+         start.countDown();
+         for (Future<?> task : tasks) {
+            task.get(5, TimeUnit.SECONDS);
+         }
+         int retained = 0;
+         for (int i = 0; i < workers * perWorker; i++) {
+            if (cache.contains(i)) {
+               retained++;
+            }
+         }
+         assertEquals(capacity, retained);
+      } finally {
+         executor.shutdownNow();
+      }
    }
 }

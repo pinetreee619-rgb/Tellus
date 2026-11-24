@@ -4,13 +4,14 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.ExecutorService;
@@ -19,6 +20,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.LongSupplier;
 
 /** Runs preload-only network requests with a conservative global concurrency cap. */
 public final class ParallelDownloadRunner {
@@ -32,8 +34,9 @@ public final class ParallelDownloadRunner {
       intProperty("tellus.preload.downloadDedupSeconds", 120, 0, 3600)
    );
    private static final ConcurrentHashMap<DownloadKey, CompletableFuture<Void>> IN_FLIGHT = new ConcurrentHashMap<>();
-   private static final ConcurrentHashMap<DownloadKey, Long> RECENTLY_COMPLETED = new ConcurrentHashMap<>();
-   private static final ConcurrentLinkedQueue<CompletedDownload> COMPLETION_ORDER = new ConcurrentLinkedQueue<>();
+   private static final RecentDownloads<DownloadKey> RECENTLY_COMPLETED = new RecentDownloads<>(
+      RECENT_DOWNLOAD_MAX, RECENT_DOWNLOAD_RETENTION_NANOS, System::nanoTime
+   );
    private static final ExecutorService EXECUTOR = Executors.newFixedThreadPool(THREADS, new ThreadFactory() {
       private final AtomicInteger index = new AtomicInteger();
 
@@ -95,11 +98,9 @@ public final class ParallelDownloadRunner {
       List<Future<T>> futures = new ArrayList<>(Math.min(items.size(), MAX_IN_FLIGHT));
       List<T> pendingItems = new ArrayList<>(items.size());
       int finished = 0;
-      long now = System.nanoTime();
       if (scope != null) {
-         cleanupRecent(now);
          for (T item : items) {
-            if (isRecentlyCompleted(new DownloadKey(scope, item), now)) {
+            if (RECENTLY_COMPLETED.contains(new DownloadKey(scope, item))) {
                finished++;
                progress.completed(item, completedUnits + finished, items.size());
             } else {
@@ -194,8 +195,7 @@ public final class ParallelDownloadRunner {
    private static <T> void downloadOnce(
       DownloadKey key, T item, ParallelDownloadRunner.CheckedConsumer<T> downloader
    ) throws Exception {
-      long now = System.nanoTime();
-      if (isRecentlyCompleted(key, now)) {
+      if (RECENTLY_COMPLETED.contains(key)) {
          return;
       }
 
@@ -208,10 +208,9 @@ public final class ParallelDownloadRunner {
 
       try {
          // Close the small race between the first recent-cache check and acquiring ownership.
-         now = System.nanoTime();
-         if (!isRecentlyCompleted(key, now)) {
+         if (!RECENTLY_COMPLETED.contains(key)) {
             downloader.accept(item);
-            rememberCompleted(key, System.nanoTime());
+            RECENTLY_COMPLETED.remember(key);
          }
          owned.complete(null);
       } catch (Exception | Error error) {
@@ -240,42 +239,56 @@ public final class ParallelDownloadRunner {
       }
    }
 
-   private static boolean isRecentlyCompleted(DownloadKey key, long now) {
-      if (RECENT_DOWNLOAD_MAX <= 0 || RECENT_DOWNLOAD_RETENTION_NANOS <= 0L) {
-         return false;
-      }
-      Long completedAt = RECENTLY_COMPLETED.get(key);
-      if (completedAt == null) {
-         return false;
-      }
-      if (now - completedAt <= RECENT_DOWNLOAD_RETENTION_NANOS) {
-         return true;
-      }
-      RECENTLY_COMPLETED.remove(key, completedAt);
-      return false;
-   }
+   /**
+    * Keeps completion order and membership in one bounded collection. The clock is sampled
+    * under the same lock as insertion so eviction order cannot diverge from completion order.
+    * No network operations run while holding this lock.
+    */
+   static final class RecentDownloads<K> {
+      private final int capacity;
+      private final long retentionNanos;
+      private final LongSupplier clock;
+      private final LinkedHashMap<K, Long> completed = new LinkedHashMap<>();
 
-   private static void rememberCompleted(DownloadKey key, long completedAt) {
-      if (RECENT_DOWNLOAD_MAX <= 0 || RECENT_DOWNLOAD_RETENTION_NANOS <= 0L) {
-         return;
+      RecentDownloads(int capacity, long retentionNanos, LongSupplier clock) {
+         this.capacity = capacity;
+         this.retentionNanos = retentionNanos;
+         this.clock = Objects.requireNonNull(clock, "clock");
       }
-      RECENTLY_COMPLETED.put(key, completedAt);
-      COMPLETION_ORDER.add(new CompletedDownload(key, completedAt));
-      cleanupRecent(completedAt);
-   }
 
-   private static void cleanupRecent(long now) {
-      while (true) {
-         CompletedDownload oldest = COMPLETION_ORDER.peek();
-         if (oldest == null) {
+      synchronized boolean contains(K key) {
+         if (this.capacity <= 0 || this.retentionNanos <= 0L) {
+            return false;
+         }
+         long now = this.clock.getAsLong();
+         this.evictExpired(now);
+         return this.completed.containsKey(key);
+      }
+
+      synchronized void remember(K key) {
+         if (this.capacity <= 0 || this.retentionNanos <= 0L) {
             return;
          }
-         boolean expired = now - oldest.completedAt() > RECENT_DOWNLOAD_RETENTION_NANOS;
-         if (!expired && RECENTLY_COMPLETED.size() <= RECENT_DOWNLOAD_MAX) {
-            return;
+         long now = this.clock.getAsLong();
+         this.evictExpired(now);
+         // Refreshing an existing key moves it to the newest position.
+         this.completed.remove(key);
+         this.completed.put(key, now);
+         if (this.completed.size() > this.capacity) {
+            Iterator<K> oldest = this.completed.keySet().iterator();
+            oldest.next();
+            oldest.remove();
          }
-         COMPLETION_ORDER.poll();
-         RECENTLY_COMPLETED.remove(oldest.key(), oldest.completedAt());
+      }
+
+      private void evictExpired(long now) {
+         Iterator<Map.Entry<K, Long>> entries = this.completed.entrySet().iterator();
+         while (entries.hasNext()) {
+            if (now - entries.next().getValue() <= this.retentionNanos) {
+               break;
+            }
+            entries.remove();
+         }
       }
    }
 
@@ -318,9 +331,6 @@ public final class ParallelDownloadRunner {
          Objects.requireNonNull(scope, "scope");
          Objects.requireNonNull(item, "item");
       }
-   }
-
-   private record CompletedDownload(DownloadKey key, long completedAt) {
    }
 
    @FunctionalInterface
