@@ -13,7 +13,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerChunkCache;
 import net.minecraft.server.level.ServerLevel;
@@ -33,7 +32,6 @@ public final class TellusVoxyPregenManager {
    private static final int COMPLETED_CACHE_MAX = 200000;
    private static final int TELEPORT_REPRIORITIZE_DISTANCE_CHUNKS = 64;
    private static final int MOVEMENT_REPRIORITIZE_DISTANCE_CHUNKS = 16;
-   private static final int REPRIORITIZE_IN_FLIGHT_KEEP_RADIUS_CHUNKS = 16;
    private static final int REPRIORITIZE_RADIUS_PADDING_CHUNKS = 8;
    private static final int PRIORITY_RADIUS_CHUNKS = 2;
    private static final int STALE_QUEUE_PRUNE_TRIGGER = 10000;
@@ -43,7 +41,7 @@ public final class TellusVoxyPregenManager {
    private final LongOpenHashSet priorityQueued = new LongOpenHashSet();
    private final LongLinkedOpenHashSet completedChunks = new LongLinkedOpenHashSet();
    private final Map<UUID, TellusVoxyPregenManager.PlayerPregenState> playerStates = new HashMap<>();
-   private final Set<Long> inFlight = ConcurrentHashMap.newKeySet();
+   private final VoxyInFlightRequests inFlight = new VoxyInFlightRequests();
    
    private volatile Boolean enabledOverride;
    
@@ -104,6 +102,7 @@ public final class TellusVoxyPregenManager {
    public void shutdown() {
       this.clearQueueAndPlayerState();
       this.inFlight.clear();
+      this.completedChunks.clear();
       this.clearOverrides();
       this.lastConfiguredVoxyRadiusChunks = 0;
       this.lastEffectiveRadiusChunks = 0;
@@ -252,8 +251,13 @@ public final class TellusVoxyPregenManager {
    private void reprioritizeForCurrentPlayers(List<ServerPlayer> players, int radius) {
       this.queue.clear();
       this.queued.clear();
-      int keepRadius = Math.min(radius + REPRIORITIZE_RADIUS_PADDING_CHUNKS, REPRIORITIZE_IN_FLIGHT_KEEP_RADIUS_CHUNKS);
-      this.releaseFarInFlight(players, keepRadius);
+      // Clearing queued work affects every player, not only the player who moved.
+      // Restart their ring scans so discarded requests can be discovered again.
+      for (PlayerPregenState state : this.playerStates.values()) {
+         state.nextRing = 0;
+      }
+      // Already-started vanilla chunk requests cannot be stopped by dropping their keys.
+      // Keep them counted until completion, even after a teleport.
       this.priorityQueue.clear();
       this.priorityQueued.clear();
 
@@ -325,14 +329,6 @@ public final class TellusVoxyPregenManager {
             if (this.queued.contains(key)) {
                this.queue.enqueue(key);
             }
-         }
-      }
-   }
-
-   private void releaseFarInFlight(List<ServerPlayer> players, int keepRadius) {
-      for (long key : this.inFlight) {
-         if (!isNearAnyPlayer(players, key, keepRadius)) {
-            this.inFlight.remove(key);
          }
       }
    }
@@ -444,15 +440,32 @@ public final class TellusVoxyPregenManager {
             }
 
             long key = polled;
-            if (!this.inFlight.contains(key) && this.inFlight.add(key)) {
+            if (this.completedChunks.contains(key)) {
+               continue;
+            }
+            Object token = this.inFlight.begin(key);
+            if (token != null) {
                int chunkX = ChunkPos.getX(key);
                int chunkZ = ChunkPos.getZ(key);
-               VoxyPregenVersionCompat.requestFullChunk(source, chunkX, chunkZ, (chunk, error) -> {
-                  this.inFlight.remove(key);
-                  if (error == null && chunk != null) {
-                     this.ingestIfLevelChunk(server, chunk, key);
-                  }
-               });
+               try {
+                  VoxyPregenVersionCompat.requestFullChunk(source, chunkX, chunkZ, (chunk, error) -> {
+                     try {
+                        // Both completion bookkeeping and the non-thread-safe completed cache
+                        // belong on the same server thread as queue processing.
+                        server.execute(() -> {
+                           if (this.inFlight.finish(key, token) && error == null && chunk != null) {
+                              this.ingestIfLevelChunk(server, chunk, key);
+                           }
+                        });
+                     } catch (RuntimeException rejected) {
+                        this.inFlight.finish(key, token);
+                        throw rejected;
+                     }
+                  });
+               } catch (RuntimeException | Error failure) {
+                  this.inFlight.finish(key, token);
+                  throw failure;
+               }
                launched++;
             }
          }
